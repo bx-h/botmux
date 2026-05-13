@@ -1,7 +1,25 @@
 import { execSync } from 'node:child_process';
 import { readdirSync, statSync, existsSync } from 'node:fs';
-import { join, basename, relative } from 'node:path';
+import { join, basename } from 'node:path';
 import { logger } from '../utils/logger.js';
+
+/**
+ * A directory's `.git` entry is a valid git marker when:
+ *   - it's a regular file (worktree gitlink, content: `gitdir: <path>`), OR
+ *   - it's a directory containing `HEAD` (the minimum a real repo has).
+ *
+ * Returning false for an empty `.git/` dir prevents the scanner from
+ * mistaking a stray empty marker (e.g. `/root/.git`) for a single repo and
+ * skipping the entire subtree below.
+ */
+function isValidGitMarker(parentDir: string): boolean {
+  const gitPath = join(parentDir, '.git');
+  let st;
+  try { st = statSync(gitPath); } catch { return false; }
+  if (st.isFile()) return true;
+  if (st.isDirectory()) return existsSync(join(gitPath, 'HEAD'));
+  return false;
+}
 
 export interface ProjectInfo {
   name: string;       // display name
@@ -69,8 +87,10 @@ export function scanProjects(baseDir: string, maxDepth: number = 3): ProjectInfo
       return;
     }
 
-    // Check if this directory is a git repo
-    if (entries.includes('.git')) {
+    // Check if this directory is a git repo. The marker must be valid —
+    // an empty `.git/` (no HEAD inside) is rejected so the scanner keeps
+    // recursing into the directory and finds the real repos below.
+    if (entries.includes('.git') && isValidGitMarker(dir)) {
       const realPath = dir;
       if (!seen.has(realPath)) {
         seen.add(realPath);

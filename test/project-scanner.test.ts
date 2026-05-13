@@ -41,11 +41,34 @@ function makeTempDir(): string {
   return mkdtempSync(join(tmpdir(), 'project-scanner-test-'));
 }
 
-/** Create a directory path (recursive) and optionally place a .git marker. */
+/** Create a directory path (recursive) and place a valid .git marker.
+ *
+ * A real git repo has `.git/HEAD` (regular repo) or `.git` is a file
+ * (worktree gitlink). The scanner requires one of these to avoid mistaking
+ * a stray empty `.git/` directory for a repository. */
 function mkRepo(relPath: string): string {
   const full = join(tempRoot, relPath);
   mkdirSync(full, { recursive: true });
   mkdirSync(join(full, '.git'), { recursive: true });
+  writeFileSync(join(full, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+  return full;
+}
+
+/** Create a directory with an empty `.git/` (no HEAD inside) — mimics the
+ *  real-world "stray empty /root/.git" that fooled the scanner. */
+function mkEmptyDotGit(relPath: string): string {
+  const full = join(tempRoot, relPath);
+  mkdirSync(full, { recursive: true });
+  mkdirSync(join(full, '.git'), { recursive: true });
+  return full;
+}
+
+/** Create a worktree-style directory where `.git` is a gitlink FILE pointing
+ *  at the real .git/worktrees/<name> directory. */
+function mkWorktreeGitlink(relPath: string, gitlinkTarget: string): string {
+  const full = join(tempRoot, relPath);
+  mkdirSync(full, { recursive: true });
+  writeFileSync(join(full, '.git'), `gitdir: ${gitlinkTarget}\n`);
   return full;
 }
 
@@ -141,6 +164,33 @@ describe('scanProjects', () => {
     expect(results).toEqual([]);
   });
 
+  it('should NOT treat an empty .git directory (no HEAD) as a git repo', () => {
+    // Mirrors the real-world incident: an empty `/root/.git` directory caused
+    // the scanner to mistake the whole home dir for a single repo, hiding all
+    // legitimate nested projects.
+    mkEmptyDotGit('stray');
+    mkRepo('stray/real-project'); // legitimate nested repo
+
+    const results = scanProjects(tempRoot);
+
+    // Only the legitimate repo should be detected; the stray .git is ignored
+    // and the scanner recurses into the directory.
+    expect(results).toHaveLength(1);
+    expect(results[0]!.name).toBe('real-project');
+  });
+
+  it('should treat a worktree-style .git gitlink (file, not dir) as a repo', () => {
+    // git worktree creates `.git` as a regular FILE with `gitdir: <path>`.
+    // The scanner must still treat the directory as a repo.
+    mkWorktreeGitlink('linked-worktree', '/some/main/.git/worktrees/feature');
+
+    const results = scanProjects(tempRoot);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]!.name).toBe('linked-worktree');
+    expect(results[0]!.type).toBe('repo');
+  });
+
   // ─── ProjectInfo structure ──────────────────────────────────────────────
 
   it('should produce correct ProjectInfo fields', () => {
@@ -171,6 +221,7 @@ describe('scanProjects', () => {
   it('should respect maxDepth = 0 (only scan the base directory itself)', () => {
     // Repo IS the base dir
     mkdirSync(join(tempRoot, '.git'), { recursive: true });
+    writeFileSync(join(tempRoot, '.git', 'HEAD'), 'ref: refs/heads/main\n');
     mkRepo('child'); // depth 1 — should not be reached
 
     const results = scanProjects(tempRoot, 0);
@@ -461,10 +512,11 @@ describe('scanMultipleProjects', () => {
 
   it('should merge results from multiple directories', () => {
     mkRepo('project-a');
-    // Create repo in second temp root
+    // Create repo in second temp root (full repo marker incl. HEAD)
     const project2 = join(tempRoot2, 'project-b');
     mkdirSync(project2, { recursive: true });
     mkdirSync(join(project2, '.git'), { recursive: true });
+    writeFileSync(join(project2, '.git', 'HEAD'), 'ref: refs/heads/main\n');
 
     const results = scanMultipleProjects([tempRoot, tempRoot2]);
 
@@ -523,6 +575,7 @@ describe('scanMultipleProjects', () => {
     const repoPathB = join(tempRoot2, 'beta');
     mkdirSync(repoPathB, { recursive: true });
     mkdirSync(join(repoPathB, '.git'), { recursive: true });
+    writeFileSync(join(repoPathB, '.git', 'HEAD'), 'ref: refs/heads/main\n');
 
     mockedExecSync.mockImplementation((cmd: string, opts?: any) => {
       const cmdStr = String(cmd);
