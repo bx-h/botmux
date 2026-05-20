@@ -448,6 +448,7 @@ ipcRoute('POST', '/api/groups/create', async (req, res) => {
     userOpenIds?: unknown;
     transferOwnerTo?: unknown;
     notifyOwnerOpenId?: unknown;
+    bindWorkingDir?: unknown;
   };
   try {
     body = await readJsonBody<{
@@ -456,6 +457,7 @@ ipcRoute('POST', '/api/groups/create', async (req, res) => {
       userOpenIds?: string[];
       transferOwnerTo?: string;
       notifyOwnerOpenId?: string;
+      bindWorkingDir?: string;
     }>(req);
   } catch {
     return jsonRes(res, 400, { error: 'bad_json' });
@@ -477,6 +479,19 @@ ipcRoute('POST', '/api/groups/create', async (req, res) => {
   const notifyTo = typeof body.notifyOwnerOpenId === 'string' && body.notifyOwnerOpenId.trim()
     ? body.notifyOwnerOpenId.trim()
     : null;
+  const bindWorkingDir = typeof body.bindWorkingDir === 'string' ? body.bindWorkingDir.trim() : '';
+  let bindResolvedPath: string | undefined;
+  if (bindWorkingDir) {
+    const resolvedPath = resolve(expandHome(bindWorkingDir));
+    if (!existsSync(resolvedPath)) {
+      return jsonRes(res, 400, { ok: false, error: `目录不存在：${resolvedPath}` });
+    }
+    let isDir = false;
+    try { isDir = statSync(resolvedPath).isDirectory(); }
+    catch (e: any) { return jsonRes(res, 400, { ok: false, error: `无法读取路径：${resolvedPath}（${e?.message ?? e}）` }); }
+    if (!isDir) return jsonRes(res, 400, { ok: false, error: `路径不是目录：${resolvedPath}` });
+    bindResolvedPath = resolvedPath;
+  }
   try {
     const r = await createGroupWithBots({
       creatorLarkAppId: cachedLarkAppId,
@@ -485,8 +500,9 @@ ipcRoute('POST', '/api/groups/create', async (req, res) => {
       userOpenIds: userIds,
       transferOwnerTo: transferTo ?? undefined,
       notifyOwnerOpenId: notifyTo ?? undefined,
+      bindWorkingDir: bindWorkingDir || undefined,
     });
-    jsonRes(res, 200, r);
+    jsonRes(res, 200, bindResolvedPath ? { ...r, bindResolvedPath } : r);
   } catch (e) {
     jsonRes(res, 502, { ok: false, error: String((e as Error).message ?? e) });
   }
