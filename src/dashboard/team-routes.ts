@@ -16,6 +16,8 @@ import { jsonRes } from './workflow-api.js';
 import { pairingStart, pairingStatusView, pairingConsume, PAIR_COOKIE, SESSION_COOKIE } from './pairing-api.js';
 import { getWebSession, revokeWebSession, type WebSession } from '../services/web-session-store.js';
 import { buildTeamRoster } from '../services/team-roster.js';
+import { getTeam, removeMember } from '../services/team-store.js';
+import { createInvite } from '../services/invite-store.js';
 import { setBotCapability, clearBotCapability } from '../services/bot-profile-store.js';
 import { listConnectors } from '../services/connector-store.js';
 import { listTriggerLogs, summarizeTriggerLogs, type TriggerLogListOptions } from '../services/trigger-log-store.js';
@@ -110,7 +112,7 @@ export async function handleTeamRoute(
   if (path === '/api/pairing/consume' && method === 'POST') {
     let body: any;
     try { body = await readBody(req); } catch { jsonRes(res, 400, { ok: false, reason: 'bad_json' }); return true; }
-    const r = pairingConsume(dataDir, String(body?.pairingId ?? ''), cookies[PAIR_COOKIE] ?? '');
+    const r = pairingConsume(dataDir, String(body?.pairingId ?? ''), cookies[PAIR_COOKIE] ?? '', undefined, body?.inviteCode ? String(body.inviteCode) : undefined);
     if (r.cookie) setCookieHeader(res, r.cookie.name, r.cookie.value, r.cookie.maxAgeMs);
     jsonRes(res, r.status, r.body);
     return true;
@@ -159,6 +161,25 @@ export async function handleTeamRoute(
     const fp = join(dataDir, 'team-roles', `${roleGet[1]}.md`);
     const content = existsSync(fp) ? readFileSync(fp, 'utf-8') : '';
     jsonRes(res, 200, { ok: true, role: content });
+    return true;
+  }
+
+  // ── Team members + invites (team内互信：任何成员可邀请/移除) ───────────────
+  if (path === '/api/team/members' && method === 'GET') {
+    const team = getTeam(dataDir, session.teamId);
+    jsonRes(res, 200, { ok: true, members: (team?.members ?? []).map(m => ({ name: m.name, openId: m.openId, unionId: m.unionId, addedAt: m.addedAt })) });
+    return true;
+  }
+  if (path === '/api/team/members' && method === 'DELETE') {
+    let body: any;
+    try { body = await readBody(req); } catch { jsonRes(res, 400, { ok: false, error: 'bad_json' }); return true; }
+    const removed = removeMember(dataDir, session.teamId, { unionId: body?.unionId, openId: body?.openId });
+    jsonRes(res, removed ? 200 : 404, { ok: removed });
+    return true;
+  }
+  if (path === '/api/team/invite' && method === 'POST') {
+    const inv = createInvite(dataDir, session.teamId, session.identity.openId ?? session.identity.unionId ?? 'unknown');
+    jsonRes(res, 200, { ok: true, code: inv.code, expiresAt: inv.expiresAt });
     return true;
   }
   if (path === '/api/team/connectors' && method === 'GET') {

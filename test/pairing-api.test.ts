@@ -11,6 +11,7 @@ import { pairingStart, pairingStatusView, pairingConsume, PAIR_COOKIE, SESSION_C
 import { claimPairing } from '../src/services/pairing-store.js';
 import { getWebSession } from '../src/services/web-session-store.js';
 import { addMember, ensureDefaultTeam, DEFAULT_TEAM_ID, isMember } from '../src/services/team-store.js';
+import { createInvite } from '../src/services/invite-store.js';
 
 let dataDir: string;
 beforeEach(() => { dataDir = mkdtempSync(join(tmpdir(), 'botmux-pairapi-')); });
@@ -57,6 +58,23 @@ describe('pairing-api', () => {
     expect(r.status).toBe(403);
     expect((r.body as any).reason).toBe('not_a_member');
     expect(r.cookie).toBeUndefined();
+  });
+
+  it('non-member joins via a valid invite; rejected without one', () => {
+    ensureDefaultTeam(dataDir);
+    addMember(dataDir, DEFAULT_TEAM_ID, { unionId: 'on_owner' }); // team already seeded
+    let p = start();
+    claimPairing(dataDir, p.code, { openId: 'ou_s', unionId: 'on_s', name: '陌生人' });
+    expect(pairingConsume(dataDir, p.pairingId, p.browserToken).status).toBe(403);
+    const { code } = createInvite(dataDir, DEFAULT_TEAM_ID, 'on_owner');
+    p = start();
+    claimPairing(dataDir, p.code, { openId: 'ou_s', unionId: 'on_s', name: '陌生人' });
+    const r = pairingConsume(dataDir, p.pairingId, p.browserToken, undefined, code);
+    expect(r.status).toBe(200);
+    expect(isMember(dataDir, DEFAULT_TEAM_ID, { unionId: 'on_s' })).toBe(true);
+    const p2 = start();
+    claimPairing(dataDir, p2.code, { openId: 'ou_t', unionId: 'on_t' });
+    expect(pairingConsume(dataDir, p2.pairingId, p2.browserToken, undefined, code).status).toBe(403);
   });
 
   it('consume before claim fails (not_claimed)', () => {

@@ -134,6 +134,30 @@ describe('handleTeamRoute', () => {
     expect(res.statusCode).toBe(401);
   });
 
+  it('a member invites and the invitee joins via the invite code', async () => {
+    const session = await login(); // 张三 bootstrapped as the first member
+    const c = 'bmx_session=' + session;
+    // member mints an invite
+    let res = makeRes();
+    await call(makeReq('POST', '/api/team/invite', { cookie: c }), res, '/api/team/invite');
+    const code = json(res).code;
+    expect(code).toBeTruthy();
+    // invitee: new browser starts pairing
+    res = makeRes();
+    await call(makeReq('POST', '/api/pairing/start'), res, '/api/pairing/start');
+    const { pairingId, code: pairCode } = json(res);
+    const bt = cookieValue(res, 'bmx_pair');
+    claimPairing(dataDir, pairCode, { openId: 'ou_2', unionId: 'on_2', name: '李四' });
+    // consume with the invite code → joins + session
+    res = makeRes();
+    await call(makeReq('POST', '/api/pairing/consume', { cookie: 'bmx_pair=' + bt, body: { pairingId, inviteCode: code } }), res, '/api/pairing/consume');
+    expect(res.statusCode).toBe(200);
+    // team now has 2 members
+    res = makeRes();
+    await call(makeReq('GET', '/api/team/members', { cookie: c }), res, '/api/team/members');
+    expect(json(res).members.length).toBe(2);
+  });
+
   it('logout clears the session cookie', async () => {
     const res = makeRes();
     await call(makeReq('POST', '/api/team/logout'), res, '/api/team/logout');

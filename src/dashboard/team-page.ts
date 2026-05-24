@@ -43,8 +43,10 @@ export const TEAM_PAGE_HTML = `<!doctype html>
   <!-- Login -->
   <section id="login" class="card hide">
     <h2>登录</h2>
-    <div id="login-start"><button class="primary" id="btn-start">开始登录</button>
-      <p class="hint">登录走飞书身份配对，不需要密码。</p></div>
+    <div id="login-start">
+      <p><input id="invite-code" placeholder="邀请码（首次加入团队需要，团队成员可生成）" style="font:inherit;padding:8px 10px;border:1px solid #d0d3d9;border-radius:8px;width:min(360px,70vw)"></p>
+      <button class="primary" id="btn-start">开始登录</button>
+      <p class="hint">登录走飞书身份配对，不需要密码。已是团队成员可不填邀请码。</p></div>
     <div id="login-code" class="hide">
       <p>在飞书里给任意一个本团队机器人发送：</p>
       <p><span class="code" id="pair-cmd"></span></p>
@@ -59,6 +61,12 @@ export const TEAM_PAGE_HTML = `<!doctype html>
       <h2>团队花名册 <span class="muted" id="team-meta"></span></h2>
       <table><thead><tr><th>机器人</th><th>CLI</th><th>能力标签</th><th>团队角色</th></tr></thead>
         <tbody id="roster"></tbody></table>
+    </section>
+    <section class="card">
+      <h2>团队成员 <span class="muted" id="members-meta"></span>
+        <button class="primary" id="btn-invite" style="float:right;font-size:13px;padding:4px 12px">邀请成员</button></h2>
+      <div id="invite-out" class="hide"></div>
+      <table><thead><tr><th>成员</th><th>open_id</th><th></th></tr></thead><tbody id="members"></tbody></table>
     </section>
     <section class="card">
       <h2>接入点（connectors）</h2>
@@ -122,6 +130,28 @@ async function showApp(){
   $('logs').innerHTML = (l.body?.logs||[]).map(x =>
     '<tr><td class="muted">'+esc((x.createdAt||'').replace('T',' ').slice(0,19))+'</td><td>'+esc(x.connectorId||'—')+'</td><td class="'+(x.status==='ok'?'ok':'err')+'">'+esc(x.action||x.status)+'</td><td class="err">'+esc(x.errorCode||'')+'</td></tr>'
   ).join('') || '<tr><td colspan=4 class=muted>暂无触发记录</td></tr>';
+
+  const m = await jget('/api/team/members');
+  const members = m.body?.members || [];
+  $('members-meta').textContent = '· ' + members.length + ' 人';
+  $('members').innerHTML = members.map(x =>
+    '<tr><td>'+esc(x.name||'(未知)')+'</td><td class="muted">'+esc(x.openId||'')+'</td><td><button class="rmmember" data-uid="'+esc(x.unionId||'')+'" data-oid="'+esc(x.openId||'')+'">移除</button></td></tr>'
+  ).join('') || '<tr><td colspan=3 class=muted>暂无成员</td></tr>';
+  document.querySelectorAll('.rmmember').forEach(btn => {
+    btn.onclick = async () => {
+      if (!confirm('从团队移除该成员?')) return;
+      await fetch('/api/team/members', { method:'DELETE', headers:{'content-type':'application/json'}, body: JSON.stringify({ unionId: btn.dataset.uid, openId: btn.dataset.oid }) });
+      showApp();
+    };
+  });
+  $('btn-invite').onclick = async () => {
+    const r = await jpost('/api/team/invite');
+    if (r.body?.code) {
+      const url = location.origin + '/team?invite=' + encodeURIComponent(r.body.code);
+      $('invite-out').classList.remove('hide');
+      $('invite-out').innerHTML = '<p class="hint">把邀请码或链接发给对方(24 小时内、单次有效):</p><p><span class="code" style="font-size:18px">'+esc(r.body.code)+'</span></p><p class="hint" style="word-break:break-all">链接: '+esc(url)+'</p>';
+    }
+  };
 }
 
 function showLogin(){ $('app').classList.add('hide'); $('login').classList.remove('hide'); }
@@ -154,7 +184,8 @@ $('btn-start').onclick = async () => {
     if (s.body?.status === 'claimed') {
       $('pair-status').textContent = '已确认（' + esc(s.body.name||'') + '），正在登录…';
       clearInterval(pollTimer);
-      const c = await jpost('/api/pairing/consume', { pairingId });
+      const inviteCode = (($('invite-code')||{}).value || new URLSearchParams(location.search).get('invite') || '').trim();
+      const c = await jpost('/api/pairing/consume', { pairingId, inviteCode });
       if (c.status === 200) showApp();
       else if (c.body?.reason === 'not_a_member') { $('login-code').classList.add('hide'); $('login-start').classList.remove('hide'); $('login-err').textContent = '你不在该团队中，请联系团队成员把你加入。'; }
       else { $('login-code').classList.add('hide'); $('login-start').classList.remove('hide'); $('login-err').textContent = '登录失败（' + esc(c.body?.reason||'') + '），请重试。'; }
@@ -165,6 +196,8 @@ $('btn-start').onclick = async () => {
 };
 
 (async () => {
+  const qi = new URLSearchParams(location.search).get('invite');
+  if (qi && $('invite-code')) $('invite-code').value = qi;
   const me = await jget('/api/team/me');
   if (me.status === 200 && me.body?.ok) showApp(); else showLogin();
 })();

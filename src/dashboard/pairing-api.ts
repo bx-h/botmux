@@ -16,6 +16,7 @@ import {
 import {
   DEFAULT_TEAM_ID, ensureDefaultTeam, getTeam, isMember, addMember,
 } from '../services/team-store.js';
+import { consumeInvite } from '../services/invite-store.js';
 import { createWebSession } from '../services/web-session-store.js';
 
 export interface PairingHandlerResult {
@@ -55,6 +56,7 @@ export function pairingConsume(
   pairingId: string,
   browserToken: string,
   teamId: string = DEFAULT_TEAM_ID,
+  inviteCode?: string,
 ): PairingHandlerResult {
   if (!pairingId || !browserToken) return { status: 400, body: { ok: false, reason: 'bad_request' } };
   const c = consumePairing(dataDir, pairingId, browserToken);
@@ -62,11 +64,17 @@ export function pairingConsume(
 
   const id = { unionId: c.claimedBy.unionId, openId: c.claimedBy.openId };
   ensureDefaultTeam(dataDir);
+  const addClaimer = () => addMember(dataDir, teamId, { unionId: c.claimedBy.unionId, openId: c.claimedBy.openId, name: c.claimedBy.name });
   let member = isMember(dataDir, teamId, id);
   if (!member && teamId === DEFAULT_TEAM_ID && (getTeam(dataDir, DEFAULT_TEAM_ID)?.members.length ?? 0) === 0) {
     // Bootstrap: first login on an empty default team seeds the team.
-    addMember(dataDir, DEFAULT_TEAM_ID, { unionId: c.claimedBy.unionId, openId: c.claimedBy.openId, name: c.claimedBy.name });
+    addClaimer();
     member = true;
+  }
+  if (!member && inviteCode) {
+    // Join via a valid single-use invite minted by an existing member.
+    const inv = consumeInvite(dataDir, inviteCode);
+    if (inv.ok && inv.teamId === teamId) { addClaimer(); member = true; }
   }
   if (!member) return { status: 403, body: { ok: false, reason: 'not_a_member' } };
 
