@@ -3265,15 +3265,23 @@ async function cmdSend(rest: string[]): Promise<void> {
         if (voiceOn) {
           const anchorId = (isChatScope ? s.chatId : s.rootMessageId) ?? s.chatId;
           elements.push({ tag: 'hr' });
+          // v2 cards reject the 1.x `tag:'action'` button container (Feishu
+          // 200861). A button must sit inside a layout container — mirror the
+          // relay picker's proven `column_set > column > [button]` shape.
           elements.push({
-            tag: 'action',
-            actions: [{
-              tag: 'button',
-              text: { tag: 'plain_text', content: '🔊 语音总结' },
-              type: 'default',
-              behaviors: [{
-                type: 'callback',
-                value: { action: 'voice_summary', session_id: sid, root_id: anchorId, lark_app_id: appId, chat_id: targetChatId },
+            tag: 'column_set',
+            horizontal_spacing: 'default',
+            columns: [{
+              tag: 'column',
+              width: 'auto',
+              elements: [{
+                tag: 'button',
+                text: { tag: 'plain_text', content: '🔊 语音总结' },
+                type: 'default',
+                behaviors: [{
+                  type: 'callback',
+                  value: { action: 'voice_summary', session_id: sid, root_id: anchorId, lark_app_id: appId, chat_id: targetChatId },
+                }],
               }],
             }],
           });
