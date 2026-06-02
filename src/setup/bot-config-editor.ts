@@ -19,6 +19,35 @@ export const CLI_ID_CHOICES: Record<string, CliId> = {
 const VALID_CLI_IDS: ReadonlySet<string> = new Set(Object.values(CLI_ID_CHOICES));
 
 /**
+ * CLI 展示名. 与 worker.ts 的 CLI_DISPLAY_NAMES / card-builder.ts 的
+ * cliDisplayNames 保持一致——这三处是已知的展示名复制点 (见 CLAUDE.md
+ * "添加新 CLI 适配器" 清单), 新增 CLI 时一并更新.
+ */
+const CLI_DISPLAY_LABELS: Record<CliId, string> = {
+  'claude-code': 'Claude',
+  'aiden': 'Aiden',
+  'coco': 'CoCo',
+  'codex': 'Codex',
+  'cursor': 'Cursor',
+  'gemini': 'Gemini',
+  'opencode': 'OpenCode',
+  'antigravity': 'Antigravity',
+  'mtr': 'MTR',
+  'hermes': 'Hermes',
+  'codex-app': 'Codex App',
+  'mira': 'Mira',
+  'seed': 'Seed',
+};
+
+/**
+ * 有序 CLI 选项 (id + 展示名), 顺序与 setup 交互菜单 (CLI_ID_CHOICES 序号
+ * 1..13) 一致. dashboard "添加机器人" 的 CLI 下拉直接读这里, 避免再抄一份
+ * 列表. 单一事实源: CLI_ID_CHOICES 的值序.
+ */
+export const CLI_OPTIONS: ReadonlyArray<{ id: CliId; label: string }> =
+  Object.values(CLI_ID_CHOICES).map(id => ({ id, label: CLI_DISPLAY_LABELS[id] ?? id }));
+
+/**
  * 把 setup 里"CLI 适配器"那一格的原始输入解析成合法的 CliId.
  *   - 空 → undefined (调用方决定 "preserve current" 还是套默认 'claude-code')
  *   - "1".."13" → CLI_ID_CHOICES 映射

@@ -23,6 +23,9 @@ import { handleFederationApi } from './dashboard/federation-api.js';
 import { handleFederationSpokeApi, syncAllMemberships } from './dashboard/federation-spoke-api.js';
 import { getRunsDir } from './workflows/runs-dir.js';
 import { BotOnboardingManager } from './dashboard/bot-onboarding.js';
+import { CLI_OPTIONS, resolveCliId } from './setup/bot-config-editor.js';
+import { invalidWorkingDirs } from './utils/working-dir.js';
+import type { CliId } from './adapters/cli/types.js';
 import type { ConnectorDefinition } from './services/connector-store.js';
 import type { WebhookLifecycleRecord } from './services/webhook-lifecycle-store.js';
 
@@ -417,8 +420,40 @@ const server = createServer(async (req, res) => {
       return handleDashboardTriggerApi(req, res, { proxyToDaemon });
     }
 
+    // CLI 下拉选项 (id + 展示名), 单一事实源在 bot-config-editor.CLI_OPTIONS,
+    // 与 setup 交互菜单顺序一致——前端打开"添加机器人"表单时拉取填充下拉.
+    if (req.method === 'GET' && url.pathname === '/api/cli-options') {
+      return jsonRes(res, 200, { options: CLI_OPTIONS });
+    }
+
     if (req.method === 'POST' && url.pathname === '/api/bot-onboarding/start') {
-      const job = botOnboarding.start();
+      let parsed: { cliId?: unknown; workingDir?: unknown; model?: unknown };
+      try {
+        const chunks: Buffer[] = [];
+        for await (const c of req) chunks.push(c as Buffer);
+        const raw = Buffer.concat(chunks).toString('utf8');
+        parsed = raw ? JSON.parse(raw) : {};
+      } catch {
+        return jsonRes(res, 400, { ok: false, error: 'bad_json' });
+      }
+      // CLI: 沿用 setup 的 resolveCliId——空 → 默认 claude-code; typo → 400.
+      let cliId: CliId | undefined;
+      try {
+        cliId = resolveCliId(typeof parsed.cliId === 'string' ? parsed.cliId : undefined) ?? 'claude-code';
+      } catch (err: any) {
+        return jsonRes(res, 400, { ok: false, error: 'invalid_cli', message: err?.message ?? String(err) });
+      }
+      // 工作目录: 留空 → '~'; 在 daemon 主机上校验目录确实存在 (对齐 setup 的
+      // ensureBotWorkingDirsExist). 失败 fail-fast, 让用户在扫码前就改对.
+      const workingDir = typeof parsed.workingDir === 'string' && parsed.workingDir.trim()
+        ? parsed.workingDir.trim()
+        : '~';
+      const bad = invalidWorkingDirs({ workingDir });
+      if (bad.length > 0) {
+        return jsonRes(res, 400, { ok: false, error: 'invalid_working_dir', message: `目录不存在或不是目录: ${bad.join(', ')}` });
+      }
+      const model = typeof parsed.model === 'string' && parsed.model.trim() ? parsed.model.trim() : undefined;
+      const job = botOnboarding.start({ cliId, workingDir, model });
       return jsonRes(res, 202, { job: botOnboarding.get(job.id) });
     }
     let mOnboard: RegExpMatchArray | null;

@@ -2,7 +2,13 @@ import { createRequire } from 'node:module';
 import { readBotsJsonOrEmpty, writeBotsJsonAtomic } from '../setup/bots-store.js';
 import { normalizeBotConfig } from '../setup/bot-config-editor.js';
 import { tryRegisterApp, type RegisterAppOptions, type RegisterAppResult } from '../setup/register-app.js';
-import { validateCredentials, type CredentialValidation } from '../setup/verify-permissions.js';
+import { validateCredentials, buildRemainingSteps, type CredentialValidation, type RemainingStep } from '../setup/verify-permissions.js';
+import {
+  automateOpenPlatformSetup,
+  type OpenPlatformAutomationOptions,
+  type OpenPlatformAutomationResult,
+} from '../setup/open-platform-automation.js';
+import type { CliId } from '../adapters/cli/types.js';
 import * as Lark from '@larksuiteoapi/node-sdk';
 
 const require = createRequire(import.meta.url);
@@ -13,22 +19,60 @@ export type BotOnboardingStatus =
   | 'starting'
   | 'waiting_for_scan'
   | 'verifying'
+  // bots.json 已写入, 正在自动配置开放平台权限 (导入 scope / redirect / 发版).
+  | 'configuring_permissions'
+  // 自动配置需要第二次扫码 (登录开放平台 Web 会话); 与建应用的 QR 不是同一个.
+  | 'waiting_for_platform_scan'
   | 'completed'
   | 'failed';
+
+/** 开放平台权限自动配置结果, 供前端展示成功摘要或手动兜底步骤. */
+export interface BotOnboardingPermission {
+  ok: boolean;
+  /** 成功导入的权限数 */
+  scopeCount?: number;
+  /** 当前租户目录里没有、被跳过的权限数 */
+  skippedScopeCount?: number;
+  /** 已提交发布的版本号 */
+  versionId?: string;
+  /** 部分权限注册失败的告警 */
+  scopeWarning?: string;
+  /** 失败原因 / 信息 (失败时给出手动步骤) */
+  reason?: string;
+  message?: string;
+}
 
 export interface BotOnboardingSnapshot {
   id: string;
   status: BotOnboardingStatus;
   createdAt: number;
   updatedAt: number;
+  // 建应用扫码 (第 1 个二维码)
   qrUrl?: string;
   qrDataUrl?: string;
   expireAt?: number;
+  // 开放平台登录扫码 (第 2 个二维码, 自动配置权限用; 缓存命中则不出现)
+  platformQrDataUrl?: string;
+  /** 自动配置进度文案 (来自 automation onStatus) */
+  permissionStatusMsg?: string;
   appId?: string;
   brand?: 'feishu' | 'lark';
+  // 实际写入的 CLI / 工作目录, 供前端完成页回显
+  cliId?: string;
+  workingDir?: string;
   addedBotIndex?: number;
+  permission?: BotOnboardingPermission;
+  /** 自动配置失败时的手动权限步骤 (深链) */
+  remainingSteps?: RemainingStep[];
   error?: string;
   message?: string;
+}
+
+/** 调用方 (dashboard) 已校验过的表单输入: CLI / 工作目录 / model. */
+export interface BotOnboardingInput {
+  cliId?: CliId;
+  workingDir?: string;
+  model?: string;
 }
 
 type RegisterAppFn = (opts?: RegisterAppOptions) => Promise<RegisterAppResult>;
@@ -37,11 +81,13 @@ type ValidateCredentialsFn = (
   appSecret: string,
   brand?: 'feishu' | 'lark',
 ) => Promise<CredentialValidation | { ok: true }>;
+type AutomateOpenPlatformFn = (opts: OpenPlatformAutomationOptions) => Promise<OpenPlatformAutomationResult>;
 
 export interface BotOnboardingManagerOptions {
   botsJsonPath: string;
   registerApp?: RegisterAppFn;
   validateCredentials?: ValidateCredentialsFn;
+  automateOpenPlatform?: AutomateOpenPlatformFn;
   renderQrDataUrl?: (url: string) => string;
   now?: () => number;
 }
@@ -85,21 +131,23 @@ export class BotOnboardingManager {
   private readonly jobs = new Map<string, BotOnboardingSnapshot>();
   private readonly registerApp: RegisterAppFn;
   private readonly validateCredentials: ValidateCredentialsFn;
+  private readonly automateOpenPlatform: AutomateOpenPlatformFn;
   private readonly renderQrDataUrl: (url: string) => string;
   private readonly now: () => number;
 
   constructor(private readonly opts: BotOnboardingManagerOptions) {
     this.registerApp = opts.registerApp ?? tryRegisterApp;
     this.validateCredentials = opts.validateCredentials ?? validateCredentials;
+    this.automateOpenPlatform = opts.automateOpenPlatform ?? automateOpenPlatformSetup;
     this.renderQrDataUrl = opts.renderQrDataUrl ?? renderQrSvgDataUrl;
     this.now = opts.now ?? (() => Date.now());
   }
 
-  start(): BotOnboardingJob {
+  start(input: BotOnboardingInput = {}): BotOnboardingJob {
     const id = `bot_${Math.random().toString(36).slice(2)}_${this.now().toString(36)}`;
     const createdAt = this.now();
     this.jobs.set(id, { id, status: 'starting', createdAt, updatedAt: createdAt });
-    const done = this.run(id).catch(err => {
+    const done = this.run(id, input).catch(err => {
       this.patch(id, {
         status: 'failed',
         error: 'unexpected_error',
@@ -120,7 +168,7 @@ export class BotOnboardingManager {
     this.jobs.set(id, { ...current, ...patch, updatedAt: this.now() });
   }
 
-  private async run(id: string): Promise<void> {
+  private async run(id: string, input: BotOnboardingInput = {}): Promise<void> {
     const result = await this.registerApp({
       onQRCodeReady: info => {
         this.patch(id, {
@@ -168,19 +216,103 @@ export class BotOnboardingManager {
       return;
     }
 
+    // CLI / 工作目录 / model 来自前端表单 (dashboard 已用 resolveCliId +
+    // invalidWorkingDirs 校验过). 留空回退到 setup 同款默认: claude-code / '~'.
+    const cliId: CliId = input.cliId ?? 'claude-code';
+    const workingDir = input.workingDir?.trim() || '~';
     const bot: Record<string, any> = {
       larkAppId: result.appId,
       larkAppSecret: result.appSecret,
-      cliId: 'claude-code',
-      workingDir: '~',
+      cliId,
+      workingDir,
     };
+    if (input.model && input.model.trim()) bot.model = input.model.trim();
     if (result.userOpenId) {
       // 优先存 union_id（on_，跨应用稳定），避免 open_id 在其他 bot 下报 cross-app 错误。
       // 用刚注册的应用自身凭证查询；若查询失败（无 contact 权限）则 fallback 到 open_id。
       bot.allowedUsers = [await resolveToUnionId(result.appId, result.appSecret, result.userOpenId)];
     }
+    const addedBotIndex = bots.length;
     writeBotsJsonAtomic(this.opts.botsJsonPath, [...bots, normalizeBotConfig(bot)]);
-    this.patch(id, { status: 'completed', addedBotIndex: bots.length });
+
+    // bots.json 已落盘——bot 本身已添加. 接下来跑 setup 同款开放平台自动配置
+    // (导入权限 / 配 redirect / 建并发版). 这一步失败不回滚 bot, 只降级到
+    // 手动权限步骤提示——和 `botmux setup` 的 finishOpenPlatformSetup 行为一致.
+    await this.configurePermissions(id, result.appId, result.brand, { cliId, workingDir, addedBotIndex });
+  }
+
+  /**
+   * 跑开放平台权限自动配置. 复用 setup 的 automateOpenPlatformSetup:
+   * - 缓存命中 (~/.botmux/feishu-session.json 有效) → 静默自动配置, 不出二维码
+   * - 否则 → 通过 onQrCode 抛出第二个二维码 (登录开放平台), 前端渲染让用户扫
+   * - 成功 → completed + 权限摘要; 失败 → completed + 手动步骤 (buildRemainingSteps)
+   *
+   * 无论自动配置成败, bot 都已写入 bots.json, 所以终态恒为 'completed'.
+   */
+  private async configurePermissions(
+    id: string,
+    appId: string,
+    brand: 'feishu' | 'lark',
+    meta: { cliId: string; workingDir: string; addedBotIndex: number },
+  ): Promise<void> {
+    this.patch(id, {
+      status: 'configuring_permissions',
+      appId,
+      cliId: meta.cliId,
+      workingDir: meta.workingDir,
+    });
+
+    let auto: OpenPlatformAutomationResult;
+    try {
+      auto = await this.automateOpenPlatform({
+        appId,
+        brand,
+        onQrCode: info => {
+          this.patch(id, {
+            status: 'waiting_for_platform_scan',
+            platformQrDataUrl: this.renderQrDataUrl(info.qrPayload),
+          });
+        },
+        onStatus: msg => {
+          // 只更新进度文案, 不动 status——onStatus 在 onQrCode 之后的轮询里就会
+          // 触发 ('等待飞书扫码'), 若把 status 拨回 configuring_permissions 会瞬间
+          // 把刚弹出的第二个二维码 (waiting_for_platform_scan) 盖掉.
+          this.patch(id, { permissionStatusMsg: msg });
+        },
+      });
+    } catch (err) {
+      // automation 不应抛 (内部已结构化返回), 兜底当作失败 → 手动步骤.
+      auto = {
+        ok: false,
+        reason: 'api_error',
+        message: err instanceof Error ? err.message : String(err),
+      };
+    }
+
+    if (auto.ok) {
+      this.patch(id, {
+        status: 'completed',
+        addedBotIndex: meta.addedBotIndex,
+        platformQrDataUrl: undefined,
+        permission: {
+          ok: true,
+          scopeCount: auto.scopeCount,
+          skippedScopeCount: auto.skippedScopeCount,
+          versionId: auto.versionId,
+          scopeWarning: auto.scopeWarning,
+        },
+      });
+      return;
+    }
+
+    // 自动配置失败: bot 已添加, 给手动权限步骤 (与 setup 失败回退一致).
+    this.patch(id, {
+      status: 'completed',
+      addedBotIndex: meta.addedBotIndex,
+      platformQrDataUrl: undefined,
+      permission: { ok: false, reason: auto.reason, message: auto.message },
+      remainingSteps: buildRemainingSteps(appId, brand),
+    });
   }
 }
 
