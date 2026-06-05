@@ -14,24 +14,33 @@
 // the board functional (name-map, timing, status) while not leaking bound dirs
 // — and keeps the "/api/bots oncall config is private" boundary honest.
 
-/** Strip per-bot oncall bindings (which carry `workingDir`) from a `/api/groups`
- *  chats array for anonymous visitors. Returns a new array; never mutates the
- *  input. Bot/chat names and `inChat` membership are preserved so the board's
- *  name-map and matrix still render. */
+/** Project a `/api/groups` chats array down to the public, board-only fields
+ *  for anonymous visitors. Explicit ALLOW-LIST (fail-closed): a chat field that
+ *  isn't named here never reaches an anon visitor, so management/config metadata
+ *  doesn't ride along. Dropped: `description`, `ownerId` (group config/PII),
+ *  `hasRole` (leaks the role/persona existence matrix even though the roles
+ *  page is token-gated), `oncallChat` (carries workingDir), `error`,
+ *  `firstSeenAt`. Kept: chat `chatId/name/chatMode` (name-map) and
+ *  `memberBots[].larkAppId/botName/inChat` (roster). Returns a new array; never
+ *  mutates the input. */
 export function redactGroupsForPublic(chats: unknown[]): unknown[] {
   if (!Array.isArray(chats)) return chats;
   return chats.map((c) => {
     if (!c || typeof c !== 'object') return c;
     const chat = c as Record<string, unknown>;
-    const memberBots = chat.memberBots;
-    if (!Array.isArray(memberBots)) return chat;
-    return {
-      ...chat,
-      memberBots: memberBots.map((mb) => {
-        if (!mb || typeof mb !== 'object') return mb;
-        return { ...(mb as Record<string, unknown>), oncallChat: null };
-      }),
+    const out: Record<string, unknown> = {
+      chatId: chat.chatId,
+      name: chat.name,
+      chatMode: chat.chatMode,
     };
+    if (Array.isArray(chat.memberBots)) {
+      out.memberBots = chat.memberBots.map((mb) => {
+        if (!mb || typeof mb !== 'object') return mb;
+        const m = mb as Record<string, unknown>;
+        return { larkAppId: m.larkAppId, botName: m.botName, inChat: m.inChat };
+      });
+    }
+    return out;
   });
 }
 
