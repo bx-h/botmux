@@ -95,7 +95,7 @@ Run `botmux setup` and follow the interactive menu:
 
 Then comes the **2nd scan**: botmux's built-in Feishu Web login automatically imports permissions, configures the `http://127.0.0.1:9768/callback` redirect URL, and creates + submits a publish version. On failure it falls back and prints the manual steps (folded below) without affecting the config already written; importing only part of the permissions still counts as success — add the rest later on the Open Platform.
 
-> ⚠️ **Currently only Feishu (feishu.cn) tenants are supported.** If scan detects a Lark international (larksuite.com) tenant, setup aborts — the daemon runtime (Lark Client/WSClient/event-dispatcher) hasn't been wired up for the `larksuite.com` domain yet. A follow-up PR will add full Lark support.
+> ✅ **Both Feishu (feishu.cn) and Lark international (larksuite.com) tenants are supported.** Scan-to-create auto-detects the tenant brand (China / international) and remembers it — no manual choice needed; the manual paste path asks once. Each bot connects to its own brand's domain, so one machine can run Feishu and Lark bots side by side, with login credentials isolated per app.
 
 At the end, setup validates credentials with a `tenant_access_token` call (only writing `bots.json` on success) and writes the full scope JSON to `~/.botmux/lark-scopes.json` for reference.
 

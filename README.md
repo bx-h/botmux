@@ -230,7 +230,7 @@ npm install -g botmux
 
 接着进入**第 2 次扫码**：botmux 内置的飞书 Web 登录会自动导入权限、配置 `http://127.0.0.1:9768/callback` 重定向 URL、创建并提交发布版本。失败会自动回退并打印手动步骤（见文末折叠），不影响已写入的配置；权限只导入了一部分也算成功，缺的可事后到开放平台补。
 
-> ⚠️ **目前仅支持飞书 (feishu.cn) 租户**。扫码检测到 Lark 国际版 (larksuite.com) 会中止 setup —— daemon runtime (Lark Client/WSClient/event-dispatcher 等) 需要一并接入 lark 域，会在单独 PR 跟进。
+> ✅ **飞书 (feishu.cn) 与 Lark 国际版 (larksuite.com) 均支持**。扫码创建时自动识别租户类型（国内 / 国际）并记住，无需手动选择；手动粘 AppID/Secret 时会让你选一次。每个机器人按所属版本独立连对应域名，同一台机器可同时跑飞书 + Lark 机器人，登录凭证按应用隔离、互不干扰。
 
 setup 末尾会用 `tenant_access_token` 校验凭证（通过才落盘 `bots.json`），并把完整权限 JSON 写到 `~/.botmux/lark-scopes.json` 备查。
 
