@@ -15,6 +15,7 @@ import {
   type SkinId,
 } from './preferences.js';
 import { applyCyberFx } from './cyber-fx.js';
+import { playSkinIntro } from './skin-intro.js';
 
 type UiListener = () => void;
 
@@ -104,6 +105,10 @@ class DashboardUiState {
   private applySkin(animate = false): void {
     document.documentElement.dataset.skin = this.skin;
     applyCyberFx(this.skin === 'cyber', animate);
+    // 2077 plays its own boot loader; the other skins get a themed switch-in intro.
+    if (animate && this.skin !== 'cyber' && this.skin !== 'default') {
+      playSkinIntro(this.skin);
+    }
   }
 
   private applyLocale(): void {

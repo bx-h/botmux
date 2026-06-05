@@ -4149,3 +4149,184 @@ body.cp-fx-slice main { animation: cp-fx-slice 0.32s steps(2, end); }
   background: linear-gradient(135deg, hsl(24 95% 55%), hsl(330 90% 60%));
   color: #fff;
 }
+
+/* ── Skin ↔ PR #123 bridge ───────────────────────────────────────────────────
+   PR #123 hardcodes panel/card backgrounds under [data-theme="dark"] (glass look)
+   instead of using --surface, so dark skins would all look alike. Re-point the
+   prominent surfaces to the active skin's --surface so switching is visible.
+   Appended last → wins over the PR's [data-theme="dark"] rules by source order. */
+:root:not([data-skin="default"]) .panel,
+:root:not([data-skin="default"]) .metric-card,
+:root:not([data-skin="default"]) .bd-card,
+:root:not([data-skin="default"]) .qcard,
+:root:not([data-skin="default"]) .mate,
+:root:not([data-skin="default"]) .session-card,
+:root:not([data-skin="default"]) .session-board-column,
+:root:not([data-skin="default"]) .filters {
+  background: var(--surface);
+}
+:root:not([data-skin="default"]) .session-board-column > header {
+  background: var(--surface-muted);
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   SKIN SWITCH-IN INTROS — short, original per-skin transitions (mounted by
+   skin-intro.ts; 2077 uses its own boot loader). All fade out via si-fade.
+   ════════════════════════════════════════════════════════════════════════════ */
+.skin-intro {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  pointer-events: none;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  /* frosted mask so the page dims softly behind the intro (less abrupt) */
+  -webkit-backdrop-filter: blur(7px);
+  backdrop-filter: blur(7px);
+  animation: si-fade var(--si-dur, 2s) ease forwards;
+}
+/* ease IN at the start + OUT at the end, instead of popping on instantly */
+@keyframes si-fade {
+  0% { opacity: 0; }
+  11% { opacity: 1; }
+  80% { opacity: 1; }
+  100% { opacity: 0; visibility: hidden; }
+}
+
+/* —— 原神: "原神，启动" — ZZZ-style text loader in Genshin's cream/teal/gold —— */
+.si-genshin {
+  background:
+    radial-gradient(circle at 50% 46%, hsl(42 92% 82% / 0.5), transparent 42%),
+    radial-gradient(circle at 50% 46%, hsl(198 80% 74% / 0.4), transparent 60%),
+    linear-gradient(180deg, hsl(214 66% 97% / 0.82), hsl(204 72% 94% / 0.82));
+}
+.si-genshin .si-gi-shine {
+  position: absolute; inset: 0;
+  background: linear-gradient(100deg, transparent 36%, hsl(42 95% 82% / 0.6) 48%, hsl(198 92% 86% / 0.55) 52%, transparent 66%);
+  background-size: 250% 100%;
+  animation: si-gi-shine var(--si-dur, 2s) ease forwards;
+}
+.si-genshin .si-gi-text {
+  position: relative;
+  font-weight: 900;
+  font-size: clamp(30px, 7vw, 64px);
+  letter-spacing: 0.12em;
+  background: linear-gradient(100deg, hsl(199 76% 40%), hsl(186 72% 46%) 42%, hsl(42 88% 50%));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  filter: drop-shadow(0 2px 0 hsl(0 0% 100% / 0.6)) drop-shadow(0 0 28px hsl(42 90% 62% / 0.6));
+  animation: si-gi-pop var(--si-dur, 2s) cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
+}
+@keyframes si-gi-shine {
+  0% { background-position: 120% 0; opacity: 0; }
+  25% { opacity: 1; }
+  75% { background-position: -40% 0; opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes si-gi-pop {
+  0% { transform: scale(0.6); opacity: 0; letter-spacing: 0.5em; }
+  35% { transform: scale(1.06); opacity: 1; letter-spacing: 0.12em; }
+  60% { transform: scale(1); }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes si-blink { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+
+/* —— 绝区零: TV static / channel-switch "NOW LOADING" —— */
+.si-zzz { background: rgba(7, 7, 13, 0.85); }
+.si-zzz .si-static {
+  position: absolute; inset: 0;
+  background:
+    repeating-linear-gradient(0deg, hsl(75 90% 60% / 0.05) 0 2px, transparent 2px 4px),
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.04) 0 2px, transparent 2px 3px);
+  mix-blend-mode: screen;
+  animation: si-zzz-static 0.12s steps(2) infinite, si-zzz-off var(--si-dur, 1.9s) ease forwards;
+}
+.si-zzz .si-roll {
+  position: absolute; left: 0; right: 0; height: 14%;
+  background: linear-gradient(180deg, transparent, hsl(75 90% 60% / 0.18), transparent);
+  animation: si-zzz-roll 0.7s linear infinite;
+}
+.si-zzz .si-now {
+  position: relative; font-family: var(--mono);
+  font-size: clamp(20px, 5vw, 40px); font-weight: 800; letter-spacing: 0.22em;
+  color: hsl(75 95% 64%); text-shadow: 0 0 18px hsl(75 90% 55% / 0.7);
+  animation: si-blink 0.7s steps(2, end) infinite;
+}
+@keyframes si-zzz-static { 0% { transform: translateY(0); } 100% { transform: translateY(-3px); } }
+@keyframes si-zzz-roll { from { top: -14%; } to { top: 100%; } }
+@keyframes si-zzz-off { 0%, 78% { transform: scaleY(1); opacity: 1; } 90% { transform: scaleY(0.02); opacity: 1; } 100% { transform: scaleY(0); opacity: 0; } }
+
+/* —— 七龙珠: 悟空骑筋斗云 whooshing across with speed lines —— */
+.si-dragonball {
+  background: linear-gradient(180deg, hsl(205 85% 72% / 0.8), hsl(198 80% 86% / 0.78) 60%, hsl(45 90% 92% / 0.8));
+}
+.si-dragonball .si-cloud {
+  display: block;
+  width: clamp(150px, 26vw, 280px); height: auto;
+  filter: drop-shadow(0 12px 18px hsl(38 80% 35% / 0.45));
+  animation: si-db-fly var(--si-dur, 1.9s) cubic-bezier(0.4, 0.02, 0.45, 1) forwards;
+}
+.si-dragonball .si-speed {
+  position: absolute; inset: 0;
+  background: repeating-linear-gradient(90deg, rgba(255,255,255,0.55) 0 2px, transparent 2px 26px);
+  opacity: 0; mix-blend-mode: overlay;
+  animation: si-db-speed var(--si-dur, 1.9s) ease forwards;
+}
+@keyframes si-db-fly {
+  0% { transform: translateX(-65vw) translateY(22px) rotate(-6deg) scale(0.9); }
+  50% { transform: translateX(0) translateY(-22px) rotate(3deg) scale(1.05); }
+  100% { transform: translateX(72vw) translateY(16px) rotate(-4deg) scale(0.92); }
+}
+@keyframes si-db-speed { 0% { opacity: 0; } 25%, 70% { opacity: 0.85; } 100% { opacity: 0; } }
+
+/* —— ikun: bouncing 3D basketball (shaded sphere + only the seams spin) —— */
+.si-ikun {
+  background:
+    radial-gradient(circle at 50% 46%, hsl(24 95% 55% / 0.22), transparent 46%),
+    linear-gradient(180deg, hsl(270 42% 9% / 0.84), hsl(276 44% 6% / 0.84));
+}
+.si-ikun .si-bball {
+  position: relative;
+  width: clamp(108px, 19vw, 168px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  transform-origin: 50% 100%;
+  background: radial-gradient(circle at 35% 28%, #ffbf80 0%, #ef8033 34%, #cf6020 66%, #8f3d0e 100%);
+  box-shadow:
+    inset -12px -14px 30px rgba(60, 20, 0, 0.55),
+    inset 9px 9px 20px rgba(255, 210, 150, 0.4),
+    0 20px 32px rgba(0, 0, 0, 0.5);
+  animation: si-ikun-bounce var(--si-dur, 1.9s) cubic-bezier(0.5, 0, 0.5, 1) forwards;
+}
+.si-ikun .si-bball::after {
+  content: '';
+  position: absolute;
+  left: 18%; top: 12%;
+  width: 32%; height: 24%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.55), transparent 72%);
+  filter: blur(3px);
+}
+.si-ikun .si-bball-seams {
+  position: absolute;
+  inset: 0;
+  animation: si-spin 0.6s linear infinite;
+}
+.si-ikun .si-bball-seams svg { display: block; width: 100%; height: 100%; }
+@keyframes si-spin { to { transform: rotate(360deg); } }
+/* uniform scale only — never distort the circle (no squash → always round) */
+@keyframes si-ikun-bounce {
+  0% { transform: translateY(-135%) scale(0.72); }
+  34% { transform: translateY(0) scale(1); }
+  52% { transform: translateY(-38%) scale(1); }
+  70% { transform: translateY(0) scale(1); }
+  84% { transform: translateY(-13%) scale(1); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skin-intro { display: none; }
+}
