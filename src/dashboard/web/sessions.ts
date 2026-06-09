@@ -70,17 +70,35 @@ function terminalHref(s: any): string | null {
   return `http://${location.hostname}:${port}${suffix}`;
 }
 
-// Terminal control for a live session. Read-only "open" segment is always shown;
-// authenticated dashboard users additionally get a "🔑" segment that mints the
-// writable (token-bearing) link on demand — fused into one pill (.term-split) so
-// the already-busy card action row gains no extra slot. `url` is the read-only
-// href (terminalHref); '' when the session has no live web terminal.
+// Cohesive icon set for the session-card action bar — stroke-based (CSS sets
+// stroke:currentColor), 16px viewBox to match the sidebar nav glyphs. Icons
+// instead of text labels keep the row a fixed width across locales: the EN
+// labels used to be wider than zh and overflowed the narrow card, spilling
+// "Close" onto its own line.
+const ICON = {
+  pin: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 14.3s4.2-3.9 4.2-7.3A4.2 4.2 0 0 0 8 2.9a4.2 4.2 0 0 0-4.2 4.1C3.8 10.4 8 14.3 8 14.3z"/><circle cx="8" cy="6.9" r="1.5"/></svg>',
+  openChat: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.4 2.8h3.8v3.8"/><path d="M13.2 2.8 7.3 8.7"/><path d="M11.5 9.3v2.9a1.2 1.2 0 0 1-1.2 1.2H3.8a1.2 1.2 0 0 1-1.2-1.2V5.7a1.2 1.2 0 0 1 1.2-1.2h2.9"/></svg>',
+  details: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.2" y="2.9" width="11.6" height="10.2" rx="1.8"/><path d="M9.9 2.9v10.2"/></svg>',
+  terminal: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.7" y="2.7" width="12.6" height="10.6" rx="2"/><path d="M4.4 6.3 6.4 8.1 4.4 9.9"/><path d="M8.2 10.2h3.4"/></svg>',
+  key: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="6" cy="6.1" r="3"/><path d="M8.1 8.2 13 13.1"/><path d="M11.3 11.4 12.6 10.1"/><path d="M12.7 12.8 13.7 11.8"/></svg>',
+  close: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.2 4.2 11.8 11.8"/><path d="M11.8 4.2 4.2 11.8"/></svg>',
+};
+
+/** Compact icon action button for the card bar. `kind` adds a tint variant. */
+function cardActBtn(action: string, icon: string, label: string, kind = ''): string {
+  return `<button type="button" class="card-act${kind ? ' ' + kind : ''}" data-action="${action}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">${icon}</button>`;
+}
+
+// Terminal access pill for a live session: a read-only "open" segment (always
+// shown) plus — for authenticated users — a "key" segment that mints the
+// writable (token-bearing) link on demand. Icon-only + tooltip keeps it compact;
+// the writable segment carries the accent fill so it reads as the real action.
 function terminalControlsHtml(url: string | null): string {
   if (!url) return '';
-  const open = `<a class="btn-link primary term-open" href="${escapeHtml(url)}" target="_blank" rel="noopener">${t('sessions.openTerminal')}</a>`;
-  if (!ui.authed) return open;
-  const write = `<button type="button" class="btn-link primary term-write" data-action="write-link" title="${escapeHtml(t('sessions.writeLinkHint'))}" aria-label="${escapeHtml(t('sessions.writeLink'))}">🔑</button>`;
-  return `<span class="term-split">${open}${write}</span>`;
+  const open = `<a class="term-btn term-open" href="${escapeHtml(url)}" target="_blank" rel="noopener" title="${escapeHtml(t('sessions.openTerminal'))}" aria-label="${escapeHtml(t('sessions.openTerminal'))}">${ICON.terminal}</a>`;
+  if (!ui.authed) return `<span class="term-pill solo">${open}</span>`;
+  const write = `<button type="button" class="term-btn term-write" data-action="write-link" title="${escapeHtml(t('sessions.writeLinkHint'))}" aria-label="${escapeHtml(t('sessions.writeLink'))}">${ICON.key}</button>`;
+  return `<span class="term-pill">${open}${write}</span>`;
 }
 
 // Mint + open the writable web terminal for `s`. The tab is opened synchronously
@@ -266,7 +284,8 @@ export function renderSessionsPage(root: HTMLElement) {
   // 打开群聊的 applink。旧 daemon 上报的行没有 scope 字段，保持定位行为。
   function chatScopeLink(s: any): string | null {
     if (s.scope !== 'chat' || !s.feishuChatLink) return null;
-    return `<a class="btn-link" href="${escapeHtml(s.feishuChatLink)}" target="_blank" rel="noopener">${t('sessions.openChat')}</a>`;
+    const label = t('sessions.openChat');
+    return `<a class="card-act" href="${escapeHtml(s.feishuChatLink)}" target="_blank" rel="noopener" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">${ICON.openChat}</a>`;
   }
 
   function boardSignalLabel(s: any): string {
@@ -310,10 +329,10 @@ export function renderSessionsPage(root: HTMLElement) {
       </div>
       ${signal ? `<div class="session-signal" title="${escapeHtml(signal)}">${escapeHtml(signal)}</div>` : ''}
       <div class="session-card-actions">
-        ${chatScopeLink(s) ?? `<button type="button" data-action="locate">${t('sessions.locate')}</button>`}
-        <button type="button" data-action="details">${t('sessions.details')}</button>
+        ${chatScopeLink(s) ?? cardActBtn('locate', ICON.pin, t('sessions.locate'))}
+        ${cardActBtn('details', ICON.details, t('sessions.details'))}
         ${terminalControlsHtml(terminal)}
-        <button type="button" class="contrast" data-action="close">${t('sessions.close')}</button>
+        ${cardActBtn('close', ICON.close, t('sessions.close'), 'danger')}
       </div>
     </article>`;
   }
