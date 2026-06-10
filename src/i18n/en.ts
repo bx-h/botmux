@@ -75,6 +75,8 @@ export const messages: Record<string, string> = {
   'card.land.body': 'The sandbox session produced **{files}** changed file(s) (**+{ins} / -{del}**).\nTarget: `{dir}`\n\nReview the diff below; "Apply to disk" will `git apply` these changes back to the real repo.',
   'card.land.files_header': 'Changed files',
   'card.land.preview_header': 'Diff preview',
+  'card.land.truncated': 'Preview truncated — full diff in the attached .patch file',
+  'card.land.patch_note': 'Full .patch attached (git apply-able)',
   'card.land.btn_apply': 'Apply to disk',
   'card.land.btn_discard': 'Discard',
   'card.land.note': 'Owner-only; changes come from an isolated clone — the real repo is untouched until you apply.',
@@ -696,12 +698,12 @@ export const messages: Record<string, string> = {
   'daemon.auto_start_member_read_failed': '⚠️ botmux “auto-start when added to a new chat” is on, but reading the chat members failed, so it can’t tell whether any authorized user is present — auto-start was skipped.\n\nMost likely cause: missing permission to read chat members (im:chat / chat info), or the “bot added to chat” event `im.chat.member.bot.added_v1` isn’t subscribed.\n\nGo to the Lark Open Platform → your app → Permissions / Event subscriptions to add them, then `botmux restart`.\n\nDetails: {detail}',
 
   // Sandbox landing (/land) errors
-  'sandbox.no_clone': 'This session has no sandbox copy (sandbox off, or the copy was cleaned up).',
-  'sandbox.clone_not_git': 'The sandbox copy isn’t a git repo; diff landing isn’t supported yet.',
+  'sandbox.no_clone': 'This session has no sandbox change layer (sandbox off, or the layer was cleaned up).',
+  'sandbox.clone_not_git': 'The sandbox change layer is unavailable; landing isn’t supported.',
   'sandbox.nothing_to_land': 'No changes to land.',
-  'sandbox.target_not_git': 'Landing target isn’t a git repo: {dir}',
-  'sandbox.apply_failed': 'git apply failed (may conflict with the current repo state; manual merge needed): {detail}',
-  'sandbox.diff_failed': 'git diff failed: {detail}',
+  'sandbox.target_not_git': 'Landing target directory does not exist: {dir}',
+  'sandbox.apply_failed': 'Landing failed: {detail}',
+  'sandbox.diff_failed': 'Reading sandbox changes failed: {detail}',
   'sandbox.workingdir_not_found': 'Session workingDir not found',
-  'sandbox.no_changes_left': 'The sandbox copy has no changes left',
+  'sandbox.no_changes_left': 'The sandbox change layer has no changes left',
 };

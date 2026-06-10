@@ -78,6 +78,8 @@ export const messages: Record<string, string> = {
   'card.land.body': '沙盒会话产生了 **{files}** 个文件改动（**+{ins} / -{del}**）。\n落盘目标：`{dir}`\n\n审阅下方 diff，确认后「应用到磁盘」会把这些改动 `git apply` 回真实仓库。',
   'card.land.files_header': '改动文件',
   'card.land.preview_header': 'diff 预览',
+  'card.land.truncated': '预览已截断，完整改动见下方 .patch 文件',
+  'card.land.patch_note': '已附完整 .patch 文件（可 git apply）',
   'card.land.btn_apply': '应用到磁盘',
   'card.land.btn_discard': '丢弃',
   'card.land.note': '仅 owner 可应用；改动来自隔离副本，应用前真实仓库不受影响。',
@@ -699,12 +701,12 @@ export const messages: Record<string, string> = {
   'daemon.auto_start_member_read_failed': '⚠️ botmux「被拉进新群自动开工」已开启，但读取群成员失败，无法判断群里是否有授权用户，自动开工被跳过。\n\n最可能原因：缺少读取群成员的权限（im:chat / 群信息读取），或没有订阅「机器人进群」事件 `im.chat.member.bot.added_v1`。\n\n请到飞书开放平台 → 应用 → 权限管理 / 事件订阅 里补齐，然后 `botmux restart`。\n\n错误详情：{detail}',
 
   // Sandbox landing (/land) errors
-  'sandbox.no_clone': '该会话没有沙盒副本（未开沙盒，或副本已清理）',
-  'sandbox.clone_not_git': '沙盒副本不是 git 仓库，暂不支持 diff 落盘',
+  'sandbox.no_clone': '该会话没有沙盒改动层（未开沙盒，或改动层已清理）',
+  'sandbox.clone_not_git': '沙盒改动层不可用，暂不支持落盘',
   'sandbox.nothing_to_land': '没有改动可落盘',
-  'sandbox.target_not_git': '落盘目标不是 git 仓库：{dir}',
-  'sandbox.apply_failed': 'git apply 失败（可能与当前仓库状态冲突，需手动合并）：{detail}',
-  'sandbox.diff_failed': 'git diff 失败：{detail}',
+  'sandbox.target_not_git': '落盘目标目录不存在：{dir}',
+  'sandbox.apply_failed': '落盘失败：{detail}',
+  'sandbox.diff_failed': '读取沙盒改动失败：{detail}',
   'sandbox.workingdir_not_found': '找不到会话 workingDir',
-  'sandbox.no_changes_left': '沙盒副本已无改动',
+  'sandbox.no_changes_left': '沙盒改动层已无改动',
 };
