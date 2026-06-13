@@ -27,6 +27,8 @@ botmux setup
 
 > ✅ **飞书 (feishu.cn) 与 Lark 国际版 (larksuite.com) 均支持**：扫码建应用时自动识别租户类型，手动粘贴时可选。同机可混跑两种。
 
+> 🔧 **扫码创建会自动配好全部权限并发版**，无需手动操作。只有加 `botmux setup --no-open-platform-auto`（跳过自动配置）或手动建应用时，才需自己去开放平台导入权限 JSON（setup 会把完整权限写到 `~/.botmux/lark-scopes.json` 并打印一键复制命令）并创建发布版本，可用性范围选「仅自己可见」自动通过。
+
 ## Step 3 · 启动
 
 ```bash
@@ -34,24 +36,7 @@ botmux start            # 启动 daemon
 botmux autostart enable # 开机自启（推荐，重启机器不丢，无需 sudo）
 ```
 
-## Step 4 · 申请权限
-
-setup 完成后会把完整权限 JSON 写到 `~/.botmux/lark-scopes.json` 并打印一键复制命令。把它复制到剪贴板，进开放平台「权限管理 → 批量导入/导出权限」粘贴提交。可用性范围选「仅自己可见」会自动通过。
-
-```bash
-# macOS
-cat ~/.botmux/lark-scopes.json | pbcopy
-# Linux 桌面
-cat ~/.botmux/lark-scopes.json | xclip -selection clipboard
-# SSH / 无 DISPLAY：直接 cat 后在本地终端鼠标选中
-cat ~/.botmux/lark-scopes.json
-```
-
-## Step 5 · 发版
-
-进开放平台「版本管理与发布 → 创建版本」并发布，可用性范围选「仅自己可见」自动通过审核。
-
-## Step 6 · 建群开聊
+## Step 4 · 建群开聊
 
 1. 飞书里创建一个**话题群**（普通群也支持）。
 2. 群设置 → 群机器人 → 添加你刚建的机器人。

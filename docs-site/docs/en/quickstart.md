@@ -27,6 +27,8 @@ An interactive wizard; just follow the prompts:
 
 > ✅ **Both Feishu (feishu.cn) and Lark (international, larksuite.com) are supported**: when creating the app by QR code, the tenant type is detected automatically; when pasting manually, you can choose it. You can mix both on the same machine.
 
+> 🔧 **Creating by QR code auto-configures all permissions and publishes a version** — no manual steps needed. Only if you add `botmux setup --no-open-platform-auto` (skip auto-config) or create the app manually do you need to import the permission JSON yourself in the Open Platform (setup writes the full set to `~/.botmux/lark-scopes.json` and prints a one-click copy command) and create/publish a version; choosing availability "Visible to me only" gets auto-approved.
+
 ## Step 3 · Start
 
 ```bash
@@ -34,24 +36,7 @@ botmux start            # Start the daemon
 botmux autostart enable # Start on boot (recommended; survives machine restarts, no sudo needed)
 ```
 
-## Step 4 · Apply for permissions
-
-After setup finishes, the complete permission JSON is written to `~/.botmux/lark-scopes.json` and a one-click copy command is printed. Copy it to your clipboard, then go to the Open Platform's "Permissions → Batch import/export permissions" and paste to submit. Choosing the availability scope "Visible to me only" gets it approved automatically.
-
-```bash
-# macOS
-cat ~/.botmux/lark-scopes.json | pbcopy
-# Linux desktop
-cat ~/.botmux/lark-scopes.json | xclip -selection clipboard
-# SSH / no DISPLAY: just cat it, then select with the mouse in your local terminal
-cat ~/.botmux/lark-scopes.json
-```
-
-## Step 5 · Publish a version
-
-In the Open Platform, go to "Version management & release → Create version" and publish; choosing the availability scope "Visible to me only" passes review automatically.
-
-## Step 6 · Create a group and start chatting
+## Step 4 · Create a group and start chatting
 
 1. Create a **topic group** in Lark (regular groups are also supported).
 2. Group settings → Group bots → add the bot you just created.
