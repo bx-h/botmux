@@ -128,6 +128,7 @@ export async function triggerSessionTurn(
       locale: localeForBot(larkAppId),
       larkAppId,
       chatId,
+      availableBots: await getAvailableBots(larkAppId, chatId),
     });
     markSessionActivity(ds);
     rememberLastCliInput(ds, prompt, content);

@@ -478,11 +478,18 @@ export class TmuxBackend implements SessionBackend {
  * This matches the user's mental model: "the tmux session should be like a
  * fresh terminal where the user runs the CLI manually."
  *
+ * BOTMUX_BIN_DIR is special: the wrapper consumes it after rcfile load to
+ * prepend this installation's shim dir to PATH, then removes the assignment
+ * before exec. That keeps the user's shell PATH intact while ensuring
+ * `botmux send/history/...` inside the agent resolves to the running fork,
+ * not an older globally installed botmux.
+ *
  * These values are injected via `/usr/bin/env KEY=VAL ... cli args` (not tmux
  * `-e`) so they land *after* rcfile load and override any leftover same-named
  * exports in the user's rcfile.
  */
 const BOTMUX_INJECTED_ENV_KEYS = [
+  'BOTMUX_BIN_DIR',
   '__OWNER_OPEN_ID',
   'BOTMUX',
   'SESSION_DATA_DIR',
@@ -534,7 +541,9 @@ export function buildBotmuxEnvAssignments(env: NodeJS.ProcessEnv | undefined): s
  * POSIX-syntax (works in bash/zsh/sh); fish/csh/nu users get remapped to
  * bash/zsh/sh by resolveUserShell() so they hit the same SCRIPT path.
  */
-export const SHELL_WRAPPER_SCRIPT = `cd -- "$1" && shift && ${REDACTED_ENV_UNSET_CLAUSE} && exec /usr/bin/env "$@"`;
+const BOTMUX_BIN_PATH_PREPEND_CLAUSE = `case "\${1-}" in BOTMUX_BIN_DIR=*) botmux_bin_dir=\${1#BOTMUX_BIN_DIR=}; shift; PATH="\${botmux_bin_dir}\${PATH:+:\$PATH}"; export PATH ;; esac`;
+
+export const SHELL_WRAPPER_SCRIPT = `cd -- "$1" && shift && ${REDACTED_ENV_UNSET_CLAUSE} && ${BOTMUX_BIN_PATH_PREPEND_CLAUSE} && exec /usr/bin/env "$@"`;
 
 /**
  * Debug variant of the wrapper script — same prelude, but the CLI runs as
@@ -556,6 +565,7 @@ export function buildDebugKeepShellScript(shellPath: string): string {
     // Same redaction as SHELL_WRAPPER_SCRIPT — so neither the CLI nor the
     // interactive debug shell that follows sees server/rcfile-inherited creds.
     REDACTED_ENV_UNSET_CLAUSE,
+    BOTMUX_BIN_PATH_PREPEND_CLAUSE,
     '/usr/bin/env "$@"',
     `printf '\\n[botmux debug] CLI exited (status %d) — interactive shell active. Type exit to close the session.\\n' "$?" >&2`,
     `exec '${safeShell}' -i`,

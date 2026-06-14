@@ -2672,8 +2672,30 @@ function findAncestorSessionContext(): { sessionId: string; turnId?: string } | 
   return findAncestorSessionContextFromMarkers(resolveDataDir());
 }
 
+function normalizeSessionIdValue(value: unknown): string | null {
+  if (!value) return null;
+  if (typeof value === 'object' && typeof (value as { sessionId?: unknown }).sessionId === 'string') {
+    const sid = (value as { sessionId: string }).sessionId.trim();
+    return sid || null;
+  }
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  if (!text) return null;
+  if (text.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(text) as { sessionId?: unknown };
+      if (typeof parsed.sessionId === 'string' && parsed.sessionId.trim()) {
+        return parsed.sessionId.trim();
+      }
+    } catch {
+      // Fall through: report the original text if it is not valid marker JSON.
+    }
+  }
+  return text;
+}
+
 function findAncestorSessionId(): string | null {
-  return findAncestorSessionContext()?.sessionId ?? null;
+  return normalizeSessionIdValue(findAncestorSessionContext()?.sessionId);
 }
 
 interface CurrentSession {
@@ -2893,7 +2915,7 @@ async function cmdSchedule(sub: string, rest: string[]): Promise<void> {
  *  failure so callers can stay focused on the happy path. */
 async function resolveSessionAppId(sessionIdArg: string | undefined): Promise<{ sid: string; larkAppId: string; session: SessionData }> {
   process.env.SESSION_DATA_DIR ??= resolveDataDir();
-  const sid = sessionIdArg ?? findAncestorSessionId();
+  const sid = normalizeSessionIdValue(sessionIdArg) ?? findAncestorSessionId();
   if (!sid) {
     console.error('无法推断 session-id。请在 Lark 话题/群里的 CLI 会话中运行，或传 --session-id <id>。');
     process.exit(1);
@@ -2917,6 +2939,17 @@ async function resolveSessionAppId(sessionIdArg: string | undefined): Promise<{ 
 }
 
 async function cmdHistory(rest: string[]): Promise<void> {
+  if (rest.includes('--help') || rest.includes('-h')) {
+    console.log(`botmux history — 读取当前会话相关飞书消息历史
+
+用法:
+  botmux history [--limit N] [--scope session|thread|chat|ambient]
+  botmux history --session-id <id> [--limit N] [--scope session|thread|chat|ambient]
+
+说明:
+  默认自动识别当前 CLI 会话；无法识别时可显式传 --session-id。`);
+    return;
+  }
   const limit = parseInt(argValue(rest, '--limit') ?? '50', 10);
   const scopeArg = argValue(rest, '--scope') ?? 'session';
   const sessionIdArg = argValue(rest, '--session-id');
@@ -3103,7 +3136,7 @@ import { resolveQuoteTarget, validateMentionDecision, parseAttentionFlag, attent
  * outbox), then block on the response file and mirror its result.
  */
 async function relaySend(rest: string[], relayDir: string): Promise<void> {
-  const sid = argValue(rest, '--session-id') ?? process.env.BOTMUX_SESSION_ID;
+  const sid = normalizeSessionIdValue(argValue(rest, '--session-id')) ?? normalizeSessionIdValue(process.env.BOTMUX_SESSION_ID);
   if (!sid) { console.error('relay: 无法确定 session-id'); process.exit(1); }
   // Resolve content with the same precedence as cmdSend (content-file > positional > stdin)
   const contentFile = argValue(rest, '--content-file');
@@ -3169,6 +3202,22 @@ async function relaySend(rest: string[], relayDir: string): Promise<void> {
 }
 
 async function cmdSend(rest: string[]): Promise<void> {
+  if (rest.includes('--help') || rest.includes('-h')) {
+    console.log(`botmux send — 发送回复到当前飞书会话
+
+用法:
+  botmux send "消息" --mention-back
+  botmux send --content-file /tmp/msg.md --no-mention
+  botmux send --session-id <id> "消息" --mention <open_id:name>
+
+常用选项:
+  --mention-back        @ 回本轮触发消息的发送者
+  --no-mention          明确不 @ 任何人
+  --mention <id:name>   显式 @ 某人或某 bot，可重复
+  --images/--files <p>  附件，可重复
+  --session-id <id>     指定会话，默认自动识别`);
+    return;
+  }
   // Sandbox relay: a file-sandboxed session has no creds/bots.json, so route
   // the send through the daemon-side outbox instead of delivering directly.
   const relayDir = process.env.BOTMUX_SEND_RELAY;
@@ -3236,7 +3285,7 @@ async function cmdSend(rest: string[]): Promise<void> {
   const attention = parseAttentionFlag(rest);
 
   const ancestorCtx = findAncestorSessionContext();
-  const sid = sessionIdArg ?? ancestorCtx?.sessionId ?? null;
+  const sid = normalizeSessionIdValue(sessionIdArg) ?? normalizeSessionIdValue(ancestorCtx?.sessionId);
   if (!sid) {
     console.error('无法推断 session-id。请在 Lark 话题内的 CLI 会话中运行，或传 --session-id <id>。');
     process.exit(1);

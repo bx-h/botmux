@@ -67,6 +67,10 @@ export interface DaemonSession {
   pendingFollowUpInput?: { userPrompt: string; cliInput: string };
   pendingAttachments?: LarkAttachment[];
   pendingMentions?: LarkMention[];    // @mentions from initial message, used when building prompt after repo selection
+  /** Coordination metadata for a deferred first prompt (for example while the
+   *  repo-selection card is pending). Runtime-only; rebuilt from inbound events
+   *  and not persisted as durable session schema. */
+  pendingCoordinationContext?: import('../services/coordination-ledger.js').CoordinationPromptContext;
   /** Sender (open_id + type + resolved name) of the initial message — stashed
    *  so the deferred spawn after repo-selection still injects a <sender> tag
    *  matching the original caller, not the user who clicked the card. */

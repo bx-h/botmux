@@ -150,18 +150,18 @@ describe('buildFooterAddressing', () => {
     )).toEqual({ sendTo: 'ou_human_caller', cc: [] });
   });
 
-  it('falls back to the human owner when the body explicitly targets a bot', () => {
+  it('does not add an implicit human footer recipient when the body explicitly targets a bot', () => {
     expect(buildFooterAddressing(
       { ownerOpenId: 'ou_owner', lastCallerOpenId: 'ou_claude_bot' },
       { isOncall: true, hasExplicitBotMention: true, knownBotOpenIds },
-    )).toEqual({ sendTo: 'ou_owner', cc: [] });
+    )).toEqual({ sendTo: undefined, cc: [] });
   });
 
-  it('keeps human owner footer outside oncall when explicitly targeting a bot', () => {
+  it('also suppresses implicit human footer outside oncall when explicitly targeting a bot', () => {
     expect(buildFooterAddressing(
       { ownerOpenId: 'ou_owner', lastCallerOpenId: 'ou_human_caller' },
       { isOncall: false, hasExplicitBotMention: true, knownBotOpenIds },
-    )).toEqual({ sendTo: 'ou_owner', cc: [] });
+    )).toEqual({ sendTo: undefined, cc: [] });
   });
 
   it('drops explicit-bot addressing when the owner is also a bot', () => {

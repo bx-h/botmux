@@ -157,6 +157,40 @@ describe('buildNewTopicPrompt', () => {
     expect(prompt).toContain('<user_message>');
     expect(prompt).not.toContain('<bot_persona');
   });
+
+  it('injects coordination context before the user message', () => {
+    const prompt = buildNewTopicPrompt(
+      '请介绍一下',
+      SESSION_ID,
+      'codex',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { name: 'Jennie', openId: 'ou_jennie' },
+      undefined,
+      undefined,
+      {
+        coordination: {
+          coordinationId: 'oc_team:om_root',
+          taskKey: 'intro',
+          ledgerStatus: 'new',
+          sourceType: 'bot',
+          sourceBotName: 'Elon',
+          assigneeLarkAppId: 'app_jennie',
+          assigneeName: 'Jennie',
+          objective: '介绍团队成员',
+          sourceMessageIds: ['om_elon_1'],
+          idempotencyKey: 'oc_team:om_root:app_jennie:intro',
+        },
+      },
+    );
+    expect(prompt).toContain('<coordination_context>');
+    expect(prompt).toContain('<ledger_status>new</ledger_status>');
+    expect(prompt).toContain('Do not initiate or continue self-introduction chains');
+    expect(prompt.indexOf('<coordination_context>')).toBeLessThan(prompt.indexOf('<user_message>'));
+  });
 });
 
 describe('buildFollowUpContent', () => {
@@ -199,6 +233,42 @@ describe('buildFollowUpContent', () => {
     expect(content).toContain('<mentions>');
     expect(content).toContain('name="Bob"');
     expect(content).toContain('open_id="ou_bob"');
+  });
+
+  it('injects available bot metadata in follow-up content', () => {
+    const content = buildFollowUpContent('继续介绍团队', SESSION_ID, {
+      mentions: [{ name: 'Trae', openId: 'ou_trae' }],
+      availableBots: [
+        { name: 'Trae', displayName: 'Trae', openId: 'ou_trae' },
+        { name: 'Jennie', displayName: 'Jennie', openId: 'ou_jennie' },
+      ],
+    });
+
+    const availableBotsBlock = content.match(/<available_bots[\s\S]*?<\/available_bots>/)?.[0] ?? '';
+    expect(availableBotsBlock).toContain('<available_bots');
+    expect(availableBotsBlock).not.toContain('open_id="ou_trae"');
+    expect(availableBotsBlock).toContain('name="Jennie"');
+    expect(availableBotsBlock).toContain('open_id="ou_jennie"');
+    expect(content.indexOf('<available_bots')).toBeLessThan(content.indexOf('<botmux_reminder>'));
+  });
+
+  it('injects coordination context into follow-up content', () => {
+    const content = buildFollowUpContent('继续', SESSION_ID, {
+      coordination: {
+        coordinationId: 'oc_team:om_root',
+        taskKey: 'task:abc',
+        ledgerStatus: 'followup',
+        sourceType: 'human',
+        assigneeLarkAppId: 'app_trae',
+        assigneeName: 'Trae',
+        objective: '补充边界',
+        sourceMessageIds: ['om_human_2'],
+        idempotencyKey: 'oc_team:om_root:app_trae:task:abc',
+      },
+    });
+    expect(content).toContain('<coordination_context>');
+    expect(content).toContain('<ledger_status>followup</ledger_status>');
+    expect(content.indexOf('<coordination_context>')).toBeLessThan(content.indexOf('<user_message>'));
   });
 
   it('should omit <session_id> but keep mentions in adopt mode', () => {
@@ -331,6 +401,21 @@ describe('buildReforkPrompt', () => {
     expect(out).toContain('path="/tmp/x.jpg"');
     expect(out).toContain('name="Alice"');
     expect(out).toContain('open_id="ou_alice"');
+  });
+
+  it('forwards available bots to the re-fork wrapper', () => {
+    const ds = makeDs();
+    const out = buildReforkPrompt(ds, '继续介绍团队', {
+      cliId: 'codex',
+      availableBots: [
+        { name: 'Trae', displayName: 'Trae', openId: 'ou_trae' },
+        { name: 'Jennie', displayName: 'Jennie', openId: 'ou_jennie' },
+      ],
+    });
+
+    expect(out).toContain('<available_bots');
+    expect(out).toContain('open_id="ou_trae"');
+    expect(out).toContain('open_id="ou_jennie"');
   });
 
   it('injects <bot_persona> for non-adopt re-fork prompts', () => {

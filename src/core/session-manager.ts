@@ -21,6 +21,7 @@ import type { CliId } from '../adapters/cli/types.js';
 import { validateZellijAdoptTarget } from './zellij-adopt-discovery.js';
 import type { BackendType } from '../adapters/backend/types.js';
 import type { LarkAttachment, LarkMention, ScheduledTask } from '../types.js';
+import type { CoordinationPromptContext } from '../services/coordination-ledger.js';
 import type { MessageResource } from '../im/lark/message-parser.js';
 import type { ResolvedSender } from '../im/lark/identity-cache.js';
 import { sessionKey, sessionAnchorId } from './types.js';
@@ -283,6 +284,28 @@ export function buildSoulPromptBlock(soulPath?: string, label = 'bot', soulRoot?
   ].join('\n');
 }
 
+function buildCoordinationContextBlock(ctx?: CoordinationPromptContext): string {
+  if (!ctx) return '';
+  return [
+    '<coordination_context>',
+    `  <coordination_id>${xmlEscape(ctx.coordinationId)}</coordination_id>`,
+    `  <task_key>${xmlEscape(ctx.taskKey)}</task_key>`,
+    `  <ledger_status>${xmlEscape(ctx.ledgerStatus)}</ledger_status>`,
+    `  <idempotency_key>${xmlEscape(ctx.idempotencyKey)}</idempotency_key>`,
+    `  <assigned_to lark_app_id="${xmlEscape(ctx.assigneeLarkAppId)}">${xmlEscape(ctx.assigneeName ?? 'this bot')}</assigned_to>`,
+    `  <source type="${xmlEscape(ctx.sourceType)}"${ctx.sourceBotName ? ` name="${xmlEscape(ctx.sourceBotName)}"` : ''} />`,
+    `  <source_message_ids>${ctx.sourceMessageIds.map(xmlEscape).join(',')}</source_message_ids>`,
+    `  <objective>${xmlEscape(ctx.objective)}</objective>`,
+    '  <rules>',
+    '    If ledger_status is duplicate or this assignee already handled this task, do not repeat the work.',
+    '    Do not ask another bot to repeat a task it has already completed or accepted unless the current message adds new requirements.',
+    '    Do not initiate or continue self-introduction chains unless the human explicitly asks for another round.',
+    '    You may mention another bot only with a concrete handoff summary, expected output, and completion standard.',
+    '  </rules>',
+    '</coordination_context>',
+  ].join('\n');
+}
+
 /**
  * Render a `<sender>` tag for prompt injection. Caller resolves the sender
  * (open_id + type + optional name) via `resolveSender(...)` in identity-cache.
@@ -339,6 +362,23 @@ export function formatAttachmentsHint(attachments?: LarkAttachment[], locale?: L
   return `<attachments hint="${xmlEscape(t('ai.attach.hint', undefined, locale))}">\n${items.join('\n')}\n</attachments>`;
 }
 
+type AvailableBotPromptEntry = { name: string; displayName: string; openId: string };
+
+function formatAvailableBotsBlock(
+  availableBots?: AvailableBotPromptEntry[],
+  mentions?: LarkMention[],
+  locale?: Locale,
+): string {
+  if (!availableBots || availableBots.length === 0) return '';
+  const mentionedOpenIds = new Set(mentions?.map(m => m.openId).filter(Boolean));
+  const unmentionedBots = availableBots.filter(b => !mentionedOpenIds.has(b.openId));
+  if (unmentionedBots.length === 0) return '';
+  const items = unmentionedBots.map(
+    b => `  <bot name="${xmlEscape(b.displayName)}" open_id="${xmlEscape(b.openId)}" />`,
+  );
+  return `<available_bots hint="${xmlEscape(t('ai.available_bots.hint', undefined, locale))}">\n${items.join('\n')}\n</available_bots>`;
+}
+
 export function buildNewTopicPrompt(
   userMessage: string,
   sessionId: string,
@@ -346,12 +386,12 @@ export function buildNewTopicPrompt(
   cliPathOverride?: string,
   attachments?: LarkAttachment[],
   mentions?: LarkMention[],
-  availableBots?: Array<{ name: string; displayName: string; openId: string }>,
+  availableBots?: AvailableBotPromptEntry[],
   followUps?: string[],
   botIdentity?: { name?: string; openId?: string },
   locale?: Locale,
   sender?: ResolvedSender,
-  opts?: { larkAppId?: string; chatId?: string; soulPath?: string; soulRoot?: string },
+  opts?: { larkAppId?: string; chatId?: string; soulPath?: string; soulRoot?: string; coordination?: CoordinationPromptContext },
 ): string {
   const adapter = createCliAdapterSync(cliId, cliPathOverride);
   // Non-Claude CLIs receive the botmux routing hints inline via the prompt
@@ -394,17 +434,7 @@ export function buildNewTopicPrompt(
     mentionBlock = `<mentions>\n${items.join('\n')}\n</mentions>`;
   }
 
-  let botBlock = '';
-  if (availableBots && availableBots.length > 0) {
-    const mentionedOpenIds = new Set(mentions?.map(m => m.openId).filter(Boolean));
-    const unmentionedBots = availableBots.filter(b => !mentionedOpenIds.has(b.openId));
-    if (unmentionedBots.length > 0) {
-      const items = unmentionedBots.map(
-        b => `  <bot name="${xmlEscape(b.displayName)}" open_id="${xmlEscape(b.openId)}" />`,
-      );
-      botBlock = `<available_bots hint="${xmlEscape(t('ai.available_bots.hint', undefined, locale))}">\n${items.join('\n')}\n</available_bots>`;
-    }
-  }
+  const botBlock = formatAvailableBotsBlock(availableBots, mentions, locale);
 
   // Messages the user sent while the repo-selection card was still pending are
   // buffered as followUps. Fold them into the single <user_message> body
@@ -417,7 +447,11 @@ export function buildNewTopicPrompt(
     : userMessage;
   const userBlock = `<user_message>\n${mergedMessage}\n</user_message>`;
   const soulBlock = buildSoulPromptBlock(opts?.soulPath, botIdentity?.name ?? cliId, opts?.soulRoot);
-  const parts: string[] = soulBlock ? [soulBlock, userBlock] : [userBlock];
+  const coordinationBlock = buildCoordinationContextBlock(opts?.coordination);
+  const parts: string[] = [];
+  if (soulBlock) parts.push(soulBlock);
+  if (coordinationBlock) parts.push(coordinationBlock);
+  parts.push(userBlock);
 
   const senderBlock = renderSenderTag(sender);
   if (senderBlock) parts.push(senderBlock);
@@ -450,9 +484,12 @@ export function buildNewTopicPrompt(
 export function buildFollowUpContent(
   content: string,
   sessionId: string,
-  opts?: { attachments?: LarkAttachment[]; mentions?: LarkMention[]; isAdoptMode?: boolean; cliId?: CliId; cliPathOverride?: string; locale?: Locale; sender?: ResolvedSender; larkAppId?: string; chatId?: string },
+  opts?: { attachments?: LarkAttachment[]; mentions?: LarkMention[]; availableBots?: AvailableBotPromptEntry[]; isAdoptMode?: boolean; cliId?: CliId; cliPathOverride?: string; locale?: Locale; sender?: ResolvedSender; larkAppId?: string; chatId?: string; coordination?: CoordinationPromptContext },
 ): string {
-  const parts: string[] = [`<user_message>\n${content}\n</user_message>`];
+  const coordinationBlock = buildCoordinationContextBlock(opts?.coordination);
+  const parts: string[] = coordinationBlock
+    ? [coordinationBlock, `<user_message>\n${content}\n</user_message>`]
+    : [`<user_message>\n${content}\n</user_message>`];
 
   const senderBlock = renderSenderTag(opts?.sender);
   if (senderBlock) parts.push(senderBlock);
@@ -490,6 +527,9 @@ export function buildFollowUpContent(
     });
     parts.push(`<mentions>\n${items.join('\n')}\n</mentions>`);
   }
+
+  const botBlock = formatAvailableBotsBlock(opts?.availableBots, opts?.mentions, opts?.locale);
+  if (botBlock) parts.push(botBlock);
 
   if (opts?.cliId !== 'mira') {
     parts.push(`<botmux_reminder>${t('ai.followup.reminder', undefined, opts?.locale)}</botmux_reminder>`);
@@ -605,6 +645,7 @@ export function buildReforkPrompt(
   opts?: {
     attachments?: LarkAttachment[];
     mentions?: LarkMention[];
+    availableBots?: AvailableBotPromptEntry[];
     cliId?: CliId;
     cliPathOverride?: string;
     selfMention?: { name?: string | null; openId?: string | null };
@@ -612,6 +653,7 @@ export function buildReforkPrompt(
     sender?: ResolvedSender;
     soulPath?: string;
     soulRoot?: string;
+    coordination?: CoordinationPromptContext;
   },
 ): string {
   const locale = opts?.locale ?? localeForBot(ds.larkAppId);
@@ -626,6 +668,7 @@ export function buildReforkPrompt(
   const followUp = buildFollowUpContent(content, ds.session.sessionId, {
     attachments: opts?.attachments,
     mentions: opts?.mentions,
+    availableBots: opts?.availableBots,
     isAdoptMode: false,
     cliId: opts?.cliId,
     cliPathOverride: opts?.cliPathOverride,
@@ -633,6 +676,7 @@ export function buildReforkPrompt(
     sender: opts?.sender,
     larkAppId: ds.larkAppId,
     chatId: ds.session.chatId,
+    coordination: opts?.coordination,
   });
   const soulBlock = buildSoulPromptBlock(opts?.soulPath, opts?.selfMention?.name ?? opts?.cliId ?? 'bot', opts?.soulRoot);
   return soulBlock ? `${soulBlock}\n\n${followUp}` : followUp;

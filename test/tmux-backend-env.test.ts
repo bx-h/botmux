@@ -48,8 +48,10 @@ describe('buildBotmuxEnvAssignments()', () => {
       NVM_BIN: '/home/u/.nvm/versions/node/v20/bin',
       HTTP_PROXY: 'http://proxy:8080',
       LANG: 'en_US.UTF-8',
+      BOTMUX_BIN_DIR: '/home/u/.botmux/bin',
     });
     expect(out).toEqual([
+      'BOTMUX_BIN_DIR=/home/u/.botmux/bin',
       '__OWNER_OPEN_ID=ou_x',
       'BOTMUX=1',
       'SESSION_DATA_DIR=/home/u/.botmux/data',
@@ -337,6 +339,53 @@ describe('shell wrapper end-to-end (the contract spawn() builds)', () => {
       expect(lines).toContain('BOTMUX_LARK_APP_ID=fresh');
       expect(lines).toContain('SESSION_DATA_DIR=fresh-dir');
       expect(lines).not.toContain('BOTMUX_LARK_APP_ID=stale');
+    },
+  );
+
+  it.skipIf(!hasEnvBin)(
+    'prepends BOTMUX_BIN_DIR to the shell PATH without leaking it to the CLI env',
+    () => {
+      tmpDir = mkdtempSync(join(tmpdir(), 'botmux-bin-dir-'));
+      const fakeBotmux = join(tmpDir, 'botmux');
+      writeFileSync(fakeBotmux, '#!/bin/sh\nprintf "fake-botmux\\n"\n');
+      chmodSync(fakeBotmux, 0o755);
+
+      const result = spawnSync(
+        '/bin/sh',
+        ['-c', SCRIPT, '_',
+          tmpdir(),
+          `BOTMUX_BIN_DIR=${tmpDir}`,
+          'botmux',
+        ],
+        { encoding: 'utf-8', env: { PATH: '/usr/bin:/bin' } },
+      );
+      expect(result.status).toBe(0);
+      expect(result.stdout.trim()).toBe('fake-botmux');
+      expect(result.stderr).toBe('');
+    },
+  );
+
+  it.skipIf(!hasEnvBin)(
+    'BOTMUX_BIN_DIR updates PATH but is consumed before /usr/bin/env prints the child env',
+    () => {
+      const binDir = mkdtempSync(join(tmpdir(), 'botmux-path-'));
+      try {
+        const result = spawnSync(
+          '/bin/sh',
+          ['-c', SCRIPT, '_',
+            tmpdir(),
+            `BOTMUX_BIN_DIR=${binDir}`,
+            '/usr/bin/env',
+          ],
+          { encoding: 'utf-8', env: { PATH: '/usr/bin:/bin' } },
+        );
+        expect(result.status).toBe(0);
+        const lines = result.stdout.split('\n');
+        expect(lines).toContain(`PATH=${binDir}:/usr/bin:/bin`);
+        expect(lines.some(l => l.startsWith('BOTMUX_BIN_DIR='))).toBe(false);
+      } finally {
+        rmSync(binDir, { recursive: true, force: true });
+      }
     },
   );
 

@@ -14,6 +14,7 @@
  */
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, writeFileSync, unlinkSync, existsSync, statSync, readdirSync, readlinkSync, readFileSync, watch as fsWatch, createWriteStream, type FSWatcher, type WriteStream } from 'node:fs';
+import { homedir } from 'node:os';
 import { atomicWriteFileSync } from './utils/atomic-write.js';
 import { isAbsolute, join } from 'node:path';
 import { drainTranscript, joinAssistantText, trailingAssistantText, findJsonlContainingFingerprint, findJsonlsContainingExactContent, findLatestJsonl, extractLastAssistantTurn, stringifyUserContent, extractTurnStartText, splitTranscriptEventsByCutoff, type TranscriptEvent } from './services/claude-transcript.js';
@@ -3649,6 +3650,7 @@ function spawnCli(cfg: Extract<DaemonToWorker, { type: 'init' }>): void {
   childEnv.BOTMUX_CHAT_ID = cfg.chatId;
   childEnv.BOTMUX_LARK_APP_ID = cfg.larkAppId;
   childEnv.BOTMUX_ROOT_MESSAGE_ID = cfg.rootMessageId;
+  childEnv.BOTMUX_BIN_DIR = join(homedir(), '.botmux', 'bin');
   // Initial value only; long-lived panes get the latest turn via the JSON pid marker.
   if (cfg.turnId) childEnv.BOTMUX_TURN_ID = cfg.turnId;
   if (injectClaudeSandbox) childEnv.IS_SANDBOX = '1';

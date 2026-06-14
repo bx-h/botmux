@@ -1328,7 +1328,7 @@ export async function handleCardAction(data: CardActionData, deps: CardHandlerDe
               { name: selfBot.botName, openId: selfBot.botOpenId },
               locDs,
               ds.pendingSender,
-              { larkAppId: ds.larkAppId, chatId: ds.chatId, soulPath: botCfg.soulPath, soulRoot: botCfg.soulRoot },
+              { larkAppId: ds.larkAppId, chatId: ds.chatId, soulPath: botCfg.soulPath, soulRoot: botCfg.soulRoot, coordination: ds.pendingCoordinationContext },
             )
           : '';
         const prompt = pendingRawInput ? '' : wrappedPrompt;
@@ -1342,6 +1342,7 @@ export async function handleCardAction(data: CardActionData, deps: CardHandlerDe
         ds.pendingPrompt = undefined;
         ds.pendingAttachments = undefined;
         ds.pendingMentions = undefined;
+        ds.pendingCoordinationContext = undefined;
         ds.pendingSender = undefined;
         ds.pendingFollowUps = undefined;
         forkWorker(ds, prompt);
@@ -1586,7 +1587,7 @@ export async function handleCardAction(data: CardActionData, deps: CardHandlerDe
             { name: selfBot.botName, openId: selfBot.botOpenId },
             locTarget,
             targetDs.pendingSender,
-            { larkAppId: targetDs.larkAppId, chatId: targetDs.chatId, soulPath: botCfg.soulPath, soulRoot: botCfg.soulRoot },
+            { larkAppId: targetDs.larkAppId, chatId: targetDs.chatId, soulPath: botCfg.soulPath, soulRoot: botCfg.soulRoot, coordination: targetDs.pendingCoordinationContext },
           )
         : '';
       const prompt = pendingRawInput ? '' : wrappedPrompt;
@@ -1607,6 +1608,7 @@ export async function handleCardAction(data: CardActionData, deps: CardHandlerDe
       targetDs.pendingPrompt = undefined;
       targetDs.pendingAttachments = undefined;
       targetDs.pendingMentions = undefined;
+      targetDs.pendingCoordinationContext = undefined;
       targetDs.pendingSender = undefined;
       targetDs.pendingFollowUps = undefined;
       forkWorker(targetDs, prompt);
