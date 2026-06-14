@@ -64,7 +64,7 @@ const reconScript = (authCheck, configCheck) => `
   echo "edit-by-$(id -un)-$$" > sandbox_edit_marker.txt
   echo "# appended in sandbox" >> app.py
   echo "RECON: wrote project files"
-  # relay shim: 'botmux' on PATH must exec node <cli.js>; help must print w/o module error
+  # relay shim: 'botmux' on PATH must exec the current Node binary + <cli.js>; help must print w/o module error
   BOUT=$(botmux --help 2>&1)
   if echo "\$BOUT" | grep -qi "Cannot find module"; then
     echo "RECON: relay_shim=CANNOT_FIND_MODULE"

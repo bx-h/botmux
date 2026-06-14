@@ -235,6 +235,21 @@ npm install -g botmux
 
 setup 末尾会用 `tenant_access_token` 校验凭证（通过才落盘 `bots.json`），并把完整权限 JSON 写到 `~/.botmux/lark-scopes.json` 备查。
 
+#### 可选：给 bot 配置 SOUL.md
+
+可以在 `~/.botmux/bots.json` 的单个 bot 配置里增加 `soulPath`，让它在新会话和 refork 时注入长期人格/岗位规则：
+
+```json
+{
+  "larkAppId": "cli_xxx",
+  "larkAppSecret": "xxx",
+  "cliId": "codex",
+  "soulPath": "souls/ceo-elon/SOUL.md"
+}
+```
+
+相对路径按 `bots.json` 所在目录解析，所以上例对应 `~/.botmux/souls/ceo-elon/SOUL.md`；最终路径必须位于同目录的 `souls/` 子树内，绝对路径也受这个边界限制。`SOUL.md` 只应写人格、职责、协作方式和长期偏好；它会以低优先级 `<bot_persona>` 注入，不能覆盖系统/安全/工具/审批/sandbox/当前用户任务。默认最大读取 `12000` 字符，可用 `BOTMUX_SOUL_MAX_CHARS` 调整。修改文件后，新的会话或 refork 生效，已有活跃会话不会热更新。
+
 ### 3. 启动
 
 ```bash

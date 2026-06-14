@@ -177,7 +177,7 @@ export async function triggerSessionTurn(
     { name: bot.botName, openId: bot.botOpenId },
     localeForBot(larkAppId),
     undefined,
-    { larkAppId, chatId },
+    { larkAppId, chatId, soulPath: bot.config.soulPath, soulRoot: bot.config.soulRoot },
   );
 
   const newDs: DaemonSession = {

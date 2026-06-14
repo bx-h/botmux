@@ -265,6 +265,58 @@ describe('isChatOncallBoundForAnyBot', () => {
   });
 });
 
+describe('parseBotConfigsFromText — soulPath', () => {
+  let mod: Awaited<ReturnType<typeof freshImport>>;
+
+  beforeEach(async () => {
+    mod = await freshImport();
+  });
+
+  it('resolves relative soulPath against the bots.json directory', () => {
+    const [cfg] = mod.parseBotConfigsFromText(JSON.stringify([
+      { larkAppId: 'a', larkAppSecret: 's', soulPath: 'souls/ceo-elon/SOUL.md' },
+    ]), '/tmp/.botmux');
+    expect(cfg.soulPath).toBe('/tmp/.botmux/souls/ceo-elon/SOUL.md');
+    expect(cfg.soulRoot).toBe('/tmp/.botmux/souls');
+  });
+
+  it('preserves absolute soulPath inside the souls directory', () => {
+    const [cfg] = mod.parseBotConfigsFromText(JSON.stringify([
+      { larkAppId: 'a', larkAppSecret: 's', soulPath: '/tmp/.botmux/souls/ceo-elon/SOUL.md' },
+    ]), '/tmp/.botmux');
+    expect(cfg.soulPath).toBe('/tmp/.botmux/souls/ceo-elon/SOUL.md');
+    expect(cfg.soulRoot).toBe('/tmp/.botmux/souls');
+  });
+
+  it('drops soulPath outside the souls directory', () => {
+    const [relativeEscape, absoluteEscape] = mod.parseBotConfigsFromText(JSON.stringify([
+      { larkAppId: 'a', larkAppSecret: 's', soulPath: '../secret.md' },
+      { larkAppId: 'b', larkAppSecret: 's', soulPath: '/etc/passwd' },
+    ]), '/tmp/.botmux');
+    expect(relativeEscape.soulPath).toBeUndefined();
+    expect(relativeEscape.soulRoot).toBeUndefined();
+    expect(absoluteEscape.soulPath).toBeUndefined();
+    expect(absoluteEscape.soulRoot).toBeUndefined();
+  });
+
+  it('drops blank or non-string soulPath', () => {
+    const [blank, nonString] = mod.parseBotConfigsFromText(JSON.stringify([
+      { larkAppId: 'a', larkAppSecret: 's', soulPath: '   ' },
+      { larkAppId: 'b', larkAppSecret: 's', soulPath: 123 },
+    ]), '/tmp/.botmux');
+    expect(blank.soulPath).toBeUndefined();
+    expect(nonString.soulPath).toBeUndefined();
+  });
+
+  it('drops soulPath when the config directory is unknown', () => {
+    const [cfg] = mod.parseBotConfigsFromText(JSON.stringify([
+      { larkAppId: 'a', larkAppSecret: 's', soulPath: 'souls/ceo-elon/SOUL.md' },
+    ]));
+    expect(cfg.soulPath).toBeUndefined();
+    expect(cfg.soulRoot).toBeUndefined();
+  });
+});
+
 // ─── loadBotConfigs ───────────────────────────────────────────────────────
 
 describe('loadBotConfigs', () => {

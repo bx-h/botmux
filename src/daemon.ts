@@ -596,7 +596,7 @@ function writePidFile(): void {
     mkdirSync(BOTMUX_BIN_DIR, { recursive: true });
     const cliScript = join(__dirname, 'cli.js');  // dist/cli.js
     const wrapper = join(BOTMUX_BIN_DIR, 'botmux');
-    const content = `#!/bin/sh\nexec node "${cliScript}" "$@"\n`;
+    const content = `#!/bin/sh\nexec "${process.execPath}" "${cliScript}" "$@"\n`;
     // Only write if changed (avoid unnecessary disk writes on every restart)
     let existing = '';
     try { existing = readFileSync(wrapper, 'utf-8'); } catch { /* doesn't exist yet */ }
@@ -2433,7 +2433,7 @@ async function handleNewTopic(data: any, ctx: RoutingContext): Promise<void> {
   if (pinnedWorkingDir) {
     if (await replyInvalidWorkingDirs(anchor, larkAppId, ds)) return;
     const selfBot = getBot(larkAppId);
-    const prompt = buildNewTopicPrompt(promptContent, session.sessionId, botCfg.cliId, botCfg.cliPathOverride, attachments, parsed.mentions, await getAvailableBots(larkAppId, chatId), undefined, { name: selfBot.botName, openId: selfBot.botOpenId }, localeForBot(larkAppId), newTopicSender, { larkAppId, chatId });
+    const prompt = buildNewTopicPrompt(promptContent, session.sessionId, botCfg.cliId, botCfg.cliPathOverride, attachments, parsed.mentions, await getAvailableBots(larkAppId, chatId), undefined, { name: selfBot.botName, openId: selfBot.botOpenId }, localeForBot(larkAppId), newTopicSender, { larkAppId, chatId, soulPath: botCfg.soulPath, soulRoot: botCfg.soulRoot });
     rememberLastCliInput(ds, promptContent, prompt);
     await postPendingResponseCard(ds, messageId, content, newTopicSender, messageId);
     forkWorker(ds, prompt);
@@ -2464,7 +2464,7 @@ async function handleNewTopic(data: any, ctx: RoutingContext): Promise<void> {
     // No projects found — skip repo selection, spawn directly
     ds.pendingRepo = false;
     const selfBot = getBot(larkAppId);
-    const prompt = buildNewTopicPrompt(promptContent, session.sessionId, botCfg.cliId, botCfg.cliPathOverride, attachments, parsed.mentions, await getAvailableBots(larkAppId, chatId), undefined, { name: selfBot.botName, openId: selfBot.botOpenId }, localeForBot(larkAppId), newTopicSender, { larkAppId, chatId });
+    const prompt = buildNewTopicPrompt(promptContent, session.sessionId, botCfg.cliId, botCfg.cliPathOverride, attachments, parsed.mentions, await getAvailableBots(larkAppId, chatId), undefined, { name: selfBot.botName, openId: selfBot.botOpenId }, localeForBot(larkAppId), newTopicSender, { larkAppId, chatId, soulPath: botCfg.soulPath, soulRoot: botCfg.soulRoot });
     rememberLastCliInput(ds, promptContent, prompt);
     await postPendingResponseCard(ds, messageId, content, newTopicSender, messageId);
     forkWorker(ds, prompt);
@@ -2636,7 +2636,7 @@ async function handleBotAdded(chatId: string, operatorOpenId: string | undefined
       promptBody, session.sessionId, botCfg.cliId, botCfg.cliPathOverride,
       undefined, undefined, await getAvailableBots(larkAppId, chatId), undefined,
       { name: selfBot.botName, openId: selfBot.botOpenId }, localeForBot(larkAppId), undefined,
-      { larkAppId, chatId },
+      { larkAppId, chatId, soulPath: botCfg.soulPath, soulRoot: botCfg.soulRoot },
     );
 
     // Pinned working dir → spawn immediately.
@@ -3179,7 +3179,7 @@ async function handleThreadReply(data: any, ctx: RoutingContext): Promise<void> 
     if (pinnedWorkingDir) {
       if (await replyInvalidWorkingDirs(anchor, larkAppId, newDs)) return;
       const selfBot = getBot(larkAppId);
-      const prompt = buildNewTopicPrompt(promptContent, session.sessionId, botCfg.cliId, botCfg.cliPathOverride, attachments, parsed.mentions, await getAvailableBots(larkAppId, autoCreateChatId), undefined, { name: selfBot.botName, openId: selfBot.botOpenId }, localeForBot(larkAppId), autoCreateSender, { larkAppId, chatId: autoCreateChatId });
+      const prompt = buildNewTopicPrompt(promptContent, session.sessionId, botCfg.cliId, botCfg.cliPathOverride, attachments, parsed.mentions, await getAvailableBots(larkAppId, autoCreateChatId), undefined, { name: selfBot.botName, openId: selfBot.botOpenId }, localeForBot(larkAppId), autoCreateSender, { larkAppId, chatId: autoCreateChatId, soulPath: botCfg.soulPath, soulRoot: botCfg.soulRoot });
       rememberLastCliInput(newDs, promptContent, prompt);
       await postPendingResponseCard(newDs, parsed.messageId, parsed.content, autoCreateSender, parsed.messageId);
       forkWorker(newDs, prompt);
@@ -3210,7 +3210,7 @@ async function handleThreadReply(data: any, ctx: RoutingContext): Promise<void> 
       // No projects found — skip repo selection, spawn directly
       newDs.pendingRepo = false;
       const selfBot = getBot(larkAppId);
-      const prompt = buildNewTopicPrompt(promptContent, session.sessionId, botCfg.cliId, botCfg.cliPathOverride, attachments, parsed.mentions, await getAvailableBots(larkAppId, autoCreateChatId), undefined, { name: selfBot.botName, openId: selfBot.botOpenId }, localeForBot(larkAppId), autoCreateSender, { larkAppId, chatId: autoCreateChatId });
+      const prompt = buildNewTopicPrompt(promptContent, session.sessionId, botCfg.cliId, botCfg.cliPathOverride, attachments, parsed.mentions, await getAvailableBots(larkAppId, autoCreateChatId), undefined, { name: selfBot.botName, openId: selfBot.botOpenId }, localeForBot(larkAppId), autoCreateSender, { larkAppId, chatId: autoCreateChatId, soulPath: botCfg.soulPath, soulRoot: botCfg.soulRoot });
       rememberLastCliInput(newDs, promptContent, prompt);
       await postPendingResponseCard(newDs, parsed.messageId, parsed.content, autoCreateSender, parsed.messageId);
       forkWorker(newDs, prompt);
@@ -3296,6 +3296,8 @@ async function handleThreadReply(data: any, ctx: RoutingContext): Promise<void> 
       cliPathOverride: dsBotCfgForFork.cliPathOverride,
       selfMention: { name: selfBot.botName, openId: selfBot.botOpenId },
       sender: await getThreadSender(),
+      soulPath: dsBotCfgForFork.soulPath,
+      soulRoot: dsBotCfgForFork.soulRoot,
     });
     rememberLastCliInput(ds, promptContent, wrappedPrompt);
     await postPendingResponseCard(ds, parsed.messageId, parsed.content, await getThreadSender(), parsed.messageId);

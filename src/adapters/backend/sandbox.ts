@@ -298,7 +298,7 @@ export function prepareSandbox(opts: {
   // `botmux` shim → THIS build's cli.js (readable natively via --ro-bind / /), so
   // in-sandbox `botmux send` hits relay mode (and never the host bots.json).
   const shim = join(shimBin, 'botmux');
-  writeFileSync(shim, `#!/bin/sh\nexec node ${JSON.stringify(distCliJs())} "$@"\n`);
+  writeFileSync(shim, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(distCliJs())} "$@"\n`);
   chmodSync(shim, 0o755);
 
   // Per-bot privacy masks: existing dirs → tmpfs blank; everything else → empty

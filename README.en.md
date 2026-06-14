@@ -99,6 +99,21 @@ Then comes the **2nd scan**: botmux's built-in Feishu Web login automatically im
 
 At the end, setup validates credentials with a `tenant_access_token` call (only writing `bots.json` on success) and writes the full scope JSON to `~/.botmux/lark-scopes.json` for reference.
 
+#### Optional: Configure SOUL.md for a bot
+
+Add `soulPath` to one bot entry in `~/.botmux/bots.json` to inject a long-lived persona / role file when a new session or refork starts:
+
+```json
+{
+  "larkAppId": "cli_xxx",
+  "larkAppSecret": "xxx",
+  "cliId": "codex",
+  "soulPath": "souls/ceo-elon/SOUL.md"
+}
+```
+
+Relative paths are resolved from the directory containing `bots.json`, so the example points at `~/.botmux/souls/ceo-elon/SOUL.md`; the final path must stay inside that directory's `souls/` subtree, and absolute paths are checked against the same boundary. `SOUL.md` should describe persona, responsibilities, collaboration style, and long-term preferences only. It is injected as a low-priority `<bot_persona>` block and cannot override system, safety, tool, approval, sandbox, or current-user instructions. The default read limit is `12000` characters and can be adjusted with `BOTMUX_SOUL_MAX_CHARS`. File edits apply to new sessions or reforks, not already-active sessions.
+
 ### 3. Start
 
 ```bash

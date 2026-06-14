@@ -42,7 +42,7 @@ const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const cliScript = join(repoRoot, 'dist', 'cli.js');
 const binDir = join(homedir(), '.botmux', 'bin');
 const wrapper = join(binDir, 'botmux');
-const content = `#!/bin/sh\nexec node "${cliScript}" "$@"\n`;
+const content = `#!/bin/sh\nexec "${process.execPath}" "${cliScript}" "$@"\n`;
 
 if (!existsSync(cliScript)) {
   console.warn(`⚠️  ${cliScript} 还不存在——先 \`pnpm build\`（或用 \`pnpm switch:here\`）。wrapper 仍按此路径写入。`);

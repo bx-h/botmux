@@ -5,6 +5,7 @@
     "cliId": "claude-code",
     "model": "sonnet",
     "disableCliBypass": true,
+    "soulPath": "souls/claude-main/SOUL.md",
     "allowedUsers": ["alice@company.com"],
     "allowedChatGroups": ["oc_xxx_team"],
     "workingDir": "~/projects",

@@ -1083,7 +1083,7 @@ export async function handleCommand(
                 { name: selfBot.botName, openId: selfBot.botOpenId },
                 loc,
                 ds!.pendingSender,
-                { larkAppId, chatId: ds!.chatId },
+                { larkAppId, chatId: ds!.chatId, soulPath: botCfg.soulPath, soulRoot: botCfg.soulRoot },
               );
               ds!.pendingFollowUpInput = {
                 userPrompt: pendingPrompt || (ds!.pendingFollowUps?.join('\n\n') ?? ''),
@@ -1106,7 +1106,7 @@ export async function handleCommand(
               { name: selfBot.botName, openId: selfBot.botOpenId },
               loc,
               ds!.pendingSender,
-              { larkAppId, chatId: ds!.chatId },
+              { larkAppId, chatId: ds!.chatId, soulPath: botCfg.soulPath, soulRoot: botCfg.soulRoot },
             );
             // Last-line defence: prompt prep awaited above — if anything
             // replaced OR closed the session in that window (`/close` deletes
