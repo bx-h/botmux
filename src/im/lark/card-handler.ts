@@ -1328,7 +1328,7 @@ export async function handleCardAction(data: CardActionData, deps: CardHandlerDe
               { name: selfBot.botName, openId: selfBot.botOpenId },
               locDs,
               ds.pendingSender,
-              { larkAppId: ds.larkAppId, chatId: ds.chatId, soulPath: botCfg.soulPath, soulRoot: botCfg.soulRoot, coordination: ds.pendingCoordinationContext },
+              { larkAppId: ds.larkAppId, chatId: ds.chatId, coordination: ds.pendingCoordinationContext },
             )
           : '';
         const prompt = pendingRawInput ? '' : wrappedPrompt;
@@ -1587,7 +1587,7 @@ export async function handleCardAction(data: CardActionData, deps: CardHandlerDe
             { name: selfBot.botName, openId: selfBot.botOpenId },
             locTarget,
             targetDs.pendingSender,
-            { larkAppId: targetDs.larkAppId, chatId: targetDs.chatId, soulPath: botCfg.soulPath, soulRoot: botCfg.soulRoot, coordination: targetDs.pendingCoordinationContext },
+            { larkAppId: targetDs.larkAppId, chatId: targetDs.chatId, coordination: targetDs.pendingCoordinationContext },
           )
         : '';
       const prompt = pendingRawInput ? '' : wrappedPrompt;

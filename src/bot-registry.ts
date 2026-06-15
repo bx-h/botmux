@@ -1,6 +1,6 @@
 import * as Lark from '@larksuiteoapi/node-sdk';
 import { readFileSync, existsSync, statSync } from 'node:fs';
-import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 import type { BackendType } from './adapters/backend/types.js';
 import type { CliId } from './adapters/cli/types.js';
@@ -70,14 +70,6 @@ export interface BotConfig {
    * `modelChoices` for the curated candidates surfaced in `botmux setup`.
    */
   model?: string;
-  /**
-   * Optional persona file for this bot. Relative paths are resolved against the
-   * directory containing bots.json, and the final path must stay inside that
-   * directory's "souls/" subtree.
-   */
-  soulPath?: string;
-  /** Internal allowlist root for `soulPath`; not written to bots.json. */
-  soulRoot?: string;
   /**
    * If true, botmux does not add CLI-default approval/sandbox bypass flags
    * such as --yolo or --dangerously-*. Missing/false preserves legacy behavior.
@@ -504,46 +496,15 @@ export function loadBotConfigs(): BotConfig[] {
 function parseBotConfigFile(filePath: string): BotConfig[] {
   const raw = readFileSync(filePath, 'utf-8');
   try {
-    return parseBotConfigsFromText(raw, dirname(filePath));
+    return parseBotConfigsFromText(raw);
   } catch (err: any) {
     // Preserve the file path in JSON-parse / shape errors for easier debugging.
     throw new Error(`${err?.message ?? err} (file: ${filePath})`);
   }
 }
 
-function expandConfigPath(p: string): string {
-  if (p === '~') return homedir();
-  return p.startsWith('~/') ? resolve(homedir(), p.slice(2)) : p;
-}
-
-function isPathInside(root: string, target: string): boolean {
-  const rel = relative(root, target);
-  return rel === '' || (!!rel && !rel.startsWith('..') && !isAbsolute(rel));
-}
-
-function normalizeSoulConfig(raw: unknown, baseDir?: string): Pick<BotConfig, 'soulPath' | 'soulRoot'> {
-  if (typeof raw !== 'string') return {};
-  const trimmed = raw.trim();
-  if (!trimmed) return {};
-  if (!baseDir) {
-    logger.warn(`[soul] ignoring soulPath because the config directory is unknown: ${trimmed}`);
-    return {};
-  }
-  const configDir = resolve(expandConfigPath(baseDir));
-  const soulRoot = resolve(configDir, 'souls');
-  const expanded = expandConfigPath(trimmed);
-  const soulPath = isAbsolute(expanded)
-    ? resolve(expanded)
-    : resolve(configDir, expanded);
-  if (!isPathInside(soulRoot, soulPath)) {
-    logger.warn(`[soul] ignoring soulPath outside ${soulRoot}: ${trimmed}`);
-    return {};
-  }
-  return { soulPath, soulRoot };
-}
-
 /** Pure parser: bots.json text → BotConfig[]. Exported for testing & reuse. */
-export function parseBotConfigsFromText(jsonText: string, baseDir?: string): BotConfig[] {
+export function parseBotConfigsFromText(jsonText: string): BotConfig[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(jsonText);
@@ -702,8 +663,6 @@ export function parseBotConfigsFromText(jsonText: string, baseDir?: string): Bot
       }
     }
 
-    const soul = normalizeSoulConfig(entry.soulPath, baseDir);
-
     configs.push({
       larkAppId: entry.larkAppId,
       larkAppSecret: entry.larkAppSecret,
@@ -719,7 +678,6 @@ export function parseBotConfigsFromText(jsonText: string, baseDir?: string): Bot
       model: typeof entry.model === 'string' && entry.model.trim()
         ? entry.model.trim()
         : undefined,
-      ...soul,
       disableCliBypass: entry.disableCliBypass === true,
       sandbox: entry.sandbox === true,
       sandboxHidePaths: Array.isArray(entry.sandboxHidePaths)

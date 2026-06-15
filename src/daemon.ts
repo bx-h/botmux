@@ -2364,6 +2364,7 @@ async function handleNewTopic(data: any, ctx: RoutingContext): Promise<void> {
     message: data?.message,
     content,
     mentions: parsed.mentions,
+    attachments,
     senderOpenId,
     isForeignBot: newTopicIsForeignBot,
     foreignBotName: newTopicIsForeignBot && senderOpenId ? lookupForeignBotName(senderOpenId, larkAppId) : undefined,
@@ -2455,7 +2456,7 @@ async function handleNewTopic(data: any, ctx: RoutingContext): Promise<void> {
   if (pinnedWorkingDir) {
     if (await replyInvalidWorkingDirs(anchor, larkAppId, ds)) return;
     const selfBot = getBot(larkAppId);
-    const prompt = buildNewTopicPrompt(promptContent, session.sessionId, botCfg.cliId, botCfg.cliPathOverride, attachments, parsed.mentions, await getAvailableBots(larkAppId, chatId), undefined, { name: selfBot.botName, openId: selfBot.botOpenId }, localeForBot(larkAppId), newTopicSender, { larkAppId, chatId, soulPath: botCfg.soulPath, soulRoot: botCfg.soulRoot, coordination: coordinationContext });
+    const prompt = buildNewTopicPrompt(promptContent, session.sessionId, botCfg.cliId, botCfg.cliPathOverride, attachments, parsed.mentions, await getAvailableBots(larkAppId, chatId), undefined, { name: selfBot.botName, openId: selfBot.botOpenId }, localeForBot(larkAppId), newTopicSender, { larkAppId, chatId, coordination: coordinationContext });
     rememberLastCliInput(ds, promptContent, prompt);
     await postPendingResponseCard(ds, messageId, content, newTopicSender, messageId);
     forkWorker(ds, prompt);
@@ -2486,7 +2487,7 @@ async function handleNewTopic(data: any, ctx: RoutingContext): Promise<void> {
     // No projects found — skip repo selection, spawn directly
     ds.pendingRepo = false;
     const selfBot = getBot(larkAppId);
-    const prompt = buildNewTopicPrompt(promptContent, session.sessionId, botCfg.cliId, botCfg.cliPathOverride, attachments, parsed.mentions, await getAvailableBots(larkAppId, chatId), undefined, { name: selfBot.botName, openId: selfBot.botOpenId }, localeForBot(larkAppId), newTopicSender, { larkAppId, chatId, soulPath: botCfg.soulPath, soulRoot: botCfg.soulRoot, coordination: coordinationContext });
+    const prompt = buildNewTopicPrompt(promptContent, session.sessionId, botCfg.cliId, botCfg.cliPathOverride, attachments, parsed.mentions, await getAvailableBots(larkAppId, chatId), undefined, { name: selfBot.botName, openId: selfBot.botOpenId }, localeForBot(larkAppId), newTopicSender, { larkAppId, chatId, coordination: coordinationContext });
     rememberLastCliInput(ds, promptContent, prompt);
     await postPendingResponseCard(ds, messageId, content, newTopicSender, messageId);
     forkWorker(ds, prompt);
@@ -2658,7 +2659,7 @@ async function handleBotAdded(chatId: string, operatorOpenId: string | undefined
       promptBody, session.sessionId, botCfg.cliId, botCfg.cliPathOverride,
       undefined, undefined, await getAvailableBots(larkAppId, chatId), undefined,
       { name: selfBot.botName, openId: selfBot.botOpenId }, localeForBot(larkAppId), undefined,
-      { larkAppId, chatId, soulPath: botCfg.soulPath, soulRoot: botCfg.soulRoot },
+      { larkAppId, chatId },
     );
 
     // Pinned working dir → spawn immediately.
@@ -2735,6 +2736,7 @@ async function evaluateInboundCoordination(args: {
   message: any;
   content: string;
   mentions?: import('./types.js').LarkMention[];
+  attachments?: import('./types.js').LarkAttachment[];
   senderOpenId?: string;
   isForeignBot: boolean;
   foreignBotName?: string;
@@ -2750,15 +2752,17 @@ async function evaluateInboundCoordination(args: {
     messageId: args.messageId,
     content: args.content,
     mentions: args.mentions,
+    attachments: args.attachments,
     sourceType: args.isForeignBot ? 'bot' : 'human',
     sourceOpenId: args.senderOpenId,
     sourceBotName: args.isForeignBot ? args.foreignBotName : undefined,
   });
   if (decision?.action === 'skip') {
     logger.info(
-      `[coordination] skip duplicate bot mention: app=${args.larkAppId} ` +
+      `[coordination] skip bot coordination turn: app=${args.larkAppId} ` +
       `coordination=${decision.context.coordinationId} task=${decision.context.taskKey} ` +
-      `message=${args.messageId.substring(0, 12)} reason=${decision.reason ?? 'duplicate'}`,
+      `revision=${decision.context.inputRevisionHash} message=${args.messageId.substring(0, 12)} ` +
+      `reason=${decision.reason ?? 'duplicate'}`,
     );
   }
   return decision;
@@ -3093,6 +3097,7 @@ async function handleThreadReply(data: any, ctx: RoutingContext): Promise<void> 
     message: data?.message,
     content: parsed.content,
     mentions: parsed.mentions,
+    attachments,
     senderOpenId: senderOpenIdForPrefix,
     isForeignBot,
     foreignBotName,
@@ -3254,7 +3259,7 @@ async function handleThreadReply(data: any, ctx: RoutingContext): Promise<void> 
     if (pinnedWorkingDir) {
       if (await replyInvalidWorkingDirs(anchor, larkAppId, newDs)) return;
       const selfBot = getBot(larkAppId);
-      const prompt = buildNewTopicPrompt(promptContent, session.sessionId, botCfg.cliId, botCfg.cliPathOverride, attachments, parsed.mentions, await getAvailableBots(larkAppId, autoCreateChatId), undefined, { name: selfBot.botName, openId: selfBot.botOpenId }, localeForBot(larkAppId), autoCreateSender, { larkAppId, chatId: autoCreateChatId, soulPath: botCfg.soulPath, soulRoot: botCfg.soulRoot, coordination: coordinationContext });
+      const prompt = buildNewTopicPrompt(promptContent, session.sessionId, botCfg.cliId, botCfg.cliPathOverride, attachments, parsed.mentions, await getAvailableBots(larkAppId, autoCreateChatId), undefined, { name: selfBot.botName, openId: selfBot.botOpenId }, localeForBot(larkAppId), autoCreateSender, { larkAppId, chatId: autoCreateChatId, coordination: coordinationContext });
       rememberLastCliInput(newDs, promptContent, prompt);
       await postPendingResponseCard(newDs, parsed.messageId, parsed.content, autoCreateSender, parsed.messageId);
       forkWorker(newDs, prompt);
@@ -3285,7 +3290,7 @@ async function handleThreadReply(data: any, ctx: RoutingContext): Promise<void> 
       // No projects found — skip repo selection, spawn directly
       newDs.pendingRepo = false;
       const selfBot = getBot(larkAppId);
-      const prompt = buildNewTopicPrompt(promptContent, session.sessionId, botCfg.cliId, botCfg.cliPathOverride, attachments, parsed.mentions, await getAvailableBots(larkAppId, autoCreateChatId), undefined, { name: selfBot.botName, openId: selfBot.botOpenId }, localeForBot(larkAppId), autoCreateSender, { larkAppId, chatId: autoCreateChatId, soulPath: botCfg.soulPath, soulRoot: botCfg.soulRoot, coordination: coordinationContext });
+      const prompt = buildNewTopicPrompt(promptContent, session.sessionId, botCfg.cliId, botCfg.cliPathOverride, attachments, parsed.mentions, await getAvailableBots(larkAppId, autoCreateChatId), undefined, { name: selfBot.botName, openId: selfBot.botOpenId }, localeForBot(larkAppId), autoCreateSender, { larkAppId, chatId: autoCreateChatId, coordination: coordinationContext });
       rememberLastCliInput(newDs, promptContent, prompt);
       await postPendingResponseCard(newDs, parsed.messageId, parsed.content, autoCreateSender, parsed.messageId);
       forkWorker(newDs, prompt);
@@ -3375,8 +3380,6 @@ async function handleThreadReply(data: any, ctx: RoutingContext): Promise<void> 
       selfMention: { name: selfBot.botName, openId: selfBot.botOpenId },
       availableBots: await getAvailableBots(ds.larkAppId, ds.session.chatId),
       sender: await getThreadSender(),
-      soulPath: dsBotCfgForFork.soulPath,
-      soulRoot: dsBotCfgForFork.soulRoot,
       coordination: coordinationContext,
     });
     rememberLastCliInput(ds, promptContent, wrappedPrompt);
