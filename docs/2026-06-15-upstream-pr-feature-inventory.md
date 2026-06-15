@@ -7,7 +7,7 @@
 - 真实 upstream：`deepcoldy/botmux`
 - 当前核对 upstream：`upstream/master` = `b39cec51`
 - 本地 fork：`bx-h/botmux`
-- 本地 HEAD / origin/master：`c3109855`
+- 本地 HEAD / origin/master：以当前 `master` 最新提交为准（本文档自身可能继续小幅修订）
 - upstream merge commit：`b0edfca9`
 - 本地分叉点：`4260691f`（v2.75.0）
 
