@@ -140,6 +140,31 @@ tmux attach -t bmx-<session-id-前8位>
 BACKEND_TYPE=pty botmux start
 ```
 
+### 本仓库 dogfood / 系统级测试部署
+
+在本机用当前 checkout 测试 botmux 时，不要只跑单测；正在运行的 daemon 读的是 `dist/`，必须先构建并重启系统里的 PM2 进程。
+
+一键部署：
+
+```bash
+COREPACK_DEFAULT_TO_LATEST=0 corepack pnpm deploy:system
+```
+
+这个脚本会按顺序执行：
+
+- `pnpm build` 生成最新 `dist/`；
+- 检查 `dist/` 不含已移除的 SOUL runtime 符号；
+- 重写 `~/.botmux/bin/botmux`，让会话内 `botmux` 命中当前 checkout；
+- 执行 `node dist/cli.js restart` 重启 botmux daemon / dashboard；
+- 执行 `node dist/cli.js status` 确认 PM2 进程在线。
+
+规则：
+
+- 只在 dogfood / 系统级测试机器上执行；它会重启 botmux daemon，但 tmux 内已有 CLI 会话会保留，下次消息会 re-attach。
+- 如果只想构建和检查，不重启线上进程：`corepack pnpm deploy:system -- --no-restart`。
+- 如果 PM2 God 进程本身也需要重启：`corepack pnpm deploy:system -- --include-pm2`。
+- 如果依赖尚未安装，先运行 `COREPACK_DEFAULT_TO_LATEST=0 corepack pnpm install --frozen-lockfile`。
+
 ### 会话接入（Adopt）
 
 将已在 tmux 中运行的 CLI 进程无缝接入 Botmux，在手机上通过飞书查看进度和交互。

@@ -253,6 +253,33 @@ BACKEND_TYPE=pty botmux start
 | `/close` or close button | Destroyed | Terminated (SIGHUP) |
 | CLI exits / crashes | Closes with it | Already exited (auto-restart creates new session) |
 
+### Dogfood / System-Level Deploy From This Checkout
+
+When testing this checkout on the dogfood machine, unit tests are not enough:
+the live daemon runs compiled files from `dist/`, so you must build and restart
+the PM2-managed runtime.
+
+One-command deploy:
+
+```bash
+COREPACK_DEFAULT_TO_LATEST=0 corepack pnpm deploy:system
+```
+
+The script does the following:
+
+- runs `pnpm build` to refresh `dist/`;
+- checks that `dist/` has no removed SOUL runtime symbols;
+- rewrites `~/.botmux/bin/botmux` so in-session `botmux` commands hit this checkout;
+- runs `node dist/cli.js restart` to restart daemon / dashboard;
+- runs `node dist/cli.js status` to verify PM2 processes are online.
+
+Rules:
+
+- Use it only on dogfood / system-test hosts. It restarts the botmux daemon, while existing tmux CLI sessions survive and re-attach on the next message.
+- Build and validate without restarting live processes: `corepack pnpm deploy:system -- --no-restart`.
+- Restart the PM2 God daemon too, when needed: `corepack pnpm deploy:system -- --include-pm2`.
+- If dependencies are missing, first run `COREPACK_DEFAULT_TO_LATEST=0 corepack pnpm install --frozen-lockfile`.
+
 ### Session Adopt
 
 Seamlessly connect Botmux to CLI processes already running in tmux — monitor and interact from your phone via Lark.
