@@ -55,6 +55,8 @@ import { logger } from './utils/logger.js';
 import { invalidWorkingDirs } from './utils/working-dir.js';
 import { firstPositional } from './cli/arg-utils.js';
 import { dispatchPrimaryMessage, findStdinAliasAttachment, sendFileAttachments } from './cli/send-dispatch.js';
+import { buildPm2SpawnCommand } from './cli/pm2-command.js';
+import { rejectLikelyWindowsStdinMojibake } from './cli/stdin-encoding.js';
 import {
   formatBotInfoEntriesForCli,
   formatChatBotsForCli,
@@ -1180,10 +1182,17 @@ function deleteAllBotmuxProcesses(home: string = PM2_HOME): void {
             env: pm2Env(home),
             timeout: 10_000,
           });
-        } catch { /* */ }
+        } catch (e) {
+          // Don't swallow silently — a failed delete here used to leave the
+          // restart half-done with no trace. Surface it (the auto-restart
+          // driver captures stderr to ~/.botmux/logs/maintenance-restart.log).
+          console.error(`[restart] pm2 delete ${app.name} failed: ${e instanceof Error ? e.message : e}`);
+        }
       }
     }
-  } catch { /* pm2 not running or no apps */ }
+  } catch (e) {
+    console.error(`[restart] pm2 jlist failed (pm2 not running or no apps?): ${e instanceof Error ? e.message : e}`);
+  }
 }
 
 function killPm2GodDaemon(home: string = PM2_HOME): void {
@@ -1362,8 +1371,10 @@ function cmdLogs(): void {
     target = `/^${PM2_NAME}/`;
   }
 
-  // Use spawn for streaming output
-  const child = spawn(pm2Bin(), ['logs', target, '--lines', lines], {
+  // Use spawn for streaming output. Windows cannot spawn a .js CLI script
+  // directly, so run the bundled pm2 script through the current node.exe.
+  const pm2 = buildPm2SpawnCommand(pm2Bin(), ['logs', target, '--lines', lines]);
+  const child = spawn(pm2.command, pm2.args, {
     stdio: 'inherit',
     env: pm2Env(),
   });
@@ -3310,6 +3321,7 @@ async function cmdSend(rest: string[]): Promise<void> {
       content = await readStdin();
     }
   }
+  if (!contentFile) rejectLikelyWindowsStdinMojibake(content);
 
   if (!content.trim() && images.length === 0 && files.length === 0) {
     console.error('没有内容可发送。用法:\n  echo "消息" | botmux send\n  botmux send "消息"\n  botmux send --content-file /tmp/msg.md --images /tmp/chart.png');
@@ -4145,6 +4157,7 @@ async function cmdReport(rest: string[]): Promise<void> {
     const pos = positionals(rest);
     content = pos.length ? pos.join(' ') : await readStdin();
   }
+  if (!contentFile) rejectLikelyWindowsStdinMojibake(content);
   if (!content.trim()) {
     console.error('没有回报内容。用法: botmux report "子项目X 完成 + 产出位置"');
     process.exit(1);
