@@ -7,8 +7,8 @@
 - 真实 upstream：`deepcoldy/botmux`
 - 当前核对 upstream：`upstream/master` = `b39cec51`
 - 本地 fork：`bx-h/botmux`
-- 本地 HEAD：`b0edfca9`，已 merge `upstream/master`
-- origin/master：`74e2f9cf`
+- 本地 HEAD / origin/master：`c3109855`
+- upstream merge commit：`b0edfca9`
 - 本地分叉点：`4260691f`（v2.75.0）
 
 当前 fork 已合入 `upstream/master`，消除了 upstream 新提交缺失造成的假 diff。后续给 upstream 提 PR 时，不应直接提交当前 merge commit；应从 `upstream/master` 新建分支，按下方拆分顺序 cherry-pick / 重做最小改动。
