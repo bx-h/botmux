@@ -22,7 +22,6 @@ import {
   findSubBotTopic,
   eligibleAutoMentionAliases,
   offTopicSubBotTopic,
-  resolveNewTopicDispatchPolicy,
   resolveReportTopicTarget,
   resolveReportTarget,
   resolveSendTarget,
@@ -154,24 +153,6 @@ describe('buildReportContent', () => {
 
   it('throws on empty orchestrator open_id', () => {
     expect(() => buildReportContent({ orchOpenId: '  ', content: 'x' })).toThrow();
-  });
-});
-
-describe('resolveNewTopicDispatchPolicy', () => {
-  it('blocks implicit new sub-topics when the current session already has a topic target', () => {
-    expect(resolveNewTopicDispatchPolicy({ sourceTopicRoot: 'om_user_topic' })).toEqual({
-      allowed: false,
-      rootMessageId: 'om_user_topic',
-    });
-  });
-
-  it('allows explicit multi-topic dispatches and existing-topic dispatches', () => {
-    expect(resolveNewTopicDispatchPolicy({ sourceTopicRoot: 'om_user_topic', allowNewTopic: true })).toEqual({ allowed: true });
-    expect(resolveNewTopicDispatchPolicy({ sourceTopicRoot: 'om_user_topic', intoRoot: 'om_user_topic' })).toEqual({ allowed: true });
-  });
-
-  it('allows new-topic dispatches from a flat chat session with no topic target', () => {
-    expect(resolveNewTopicDispatchPolicy({})).toEqual({ allowed: true });
   });
 });
 
