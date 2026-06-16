@@ -20,7 +20,7 @@ import { getBot, getAllBots } from '../bot-registry.js';
 import type { CliId } from '../adapters/cli/types.js';
 import { validateZellijAdoptTarget } from './zellij-adopt-discovery.js';
 import type { BackendType } from '../adapters/backend/types.js';
-import type { LarkAttachment, LarkMention, ScheduledTask } from '../types.js';
+import { effectiveSessionScope, type LarkAttachment, type LarkMention, type ScheduledTask } from '../types.js';
 import type { CoordinationPromptContext } from '../services/coordination-ledger.js';
 import type { MessageResource } from '../im/lark/message-parser.js';
 import type { ResolvedSender } from '../im/lark/identity-cache.js';
@@ -722,9 +722,11 @@ export async function restoreActiveSessions(activeSessions: Map<string, DaemonSe
   logger.info(`Registering ${active.length} active session(s) (no CLI spawn until new messages arrive)...`);
 
   for (const session of active) {
-    // Restored sessions persisted before the scope field was added default to
-    // 'thread' — that matches the legacy thread-only behaviour.
-    const scope: 'thread' | 'chat' = session.scope === 'chat' ? 'chat' : 'thread';
+    const scope = effectiveSessionScope(session);
+    if (session.scope !== scope) {
+      session.scope = scope;
+      sessionStore.updateSession(session);
+    }
 
     // Adopt sessions: restore if original CLI is still alive, otherwise close
     if (session.title?.startsWith('Adopt:') && session.adoptedFrom) {
@@ -769,6 +771,7 @@ export async function restoreActiveSessions(activeSessions: Map<string, DaemonSe
         lastUserPrompt: session.lastUserPrompt,
         lastCliInput: session.lastCliInput,
         replyThreadAliases: session.replyThreadAliases,
+        replyTurnTargets: session.replyTurnTargets,
         currentReplyTarget: session.currentReplyTarget,
         pendingResponseCardId: session.pendingResponseCardId,
         pendingResponseCardState: session.pendingResponseCardState,
@@ -827,6 +830,7 @@ export async function restoreActiveSessions(activeSessions: Map<string, DaemonSe
       lastUserPrompt: session.lastUserPrompt,
       lastCliInput: session.lastCliInput,
       replyThreadAliases: session.replyThreadAliases,
+      replyTurnTargets: session.replyTurnTargets,
       currentReplyTarget: session.currentReplyTarget,
       pendingResponseCardId: session.pendingResponseCardId,
       pendingResponseCardState: session.pendingResponseCardState,
@@ -987,7 +991,10 @@ export async function resumeSession(
     return { ok: false, error: 'adopt_unsupported' };
   }
 
-  const scope: 'thread' | 'chat' = session.scope === 'chat' ? 'chat' : 'thread';
+  const scope = effectiveSessionScope(session);
+  if (session.scope !== scope) {
+    session.scope = scope;
+  }
   const larkAppId = session.larkAppId ?? getAllBots()[0]?.config.larkAppId ?? '';
   const anchor = scope === 'thread' ? session.rootMessageId : session.chatId;
   const key = sessionKey(anchor, larkAppId);
@@ -1042,7 +1049,7 @@ export async function resumeSession(
     s.sessionId !== sessionId
     && s.status === 'active'
     && (s.larkAppId ?? '') === larkAppId
-    && (s.scope === 'chat' ? 'chat' : 'thread') === scope
+    && effectiveSessionScope(s) === scope
     && (scope === 'thread' ? s.rootMessageId === anchor : s.chatId === anchor),
   );
   const realConflict = conflicts.find(s => !!s.cliId || !!s.lastCliInput);
@@ -1085,6 +1092,7 @@ export async function resumeSession(
     lastUserPrompt: session.lastUserPrompt,
     lastCliInput: session.lastCliInput,
     replyThreadAliases: session.replyThreadAliases,
+    replyTurnTargets: session.replyTurnTargets,
     currentReplyTarget: session.currentReplyTarget,
     pendingResponseCardId: session.pendingResponseCardId,
     pendingResponseCardState: session.pendingResponseCardState,

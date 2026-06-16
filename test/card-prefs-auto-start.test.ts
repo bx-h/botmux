@@ -62,7 +62,7 @@ describe('card-prefs store — 主动开工 fields', () => {
     expect(prefs.autoStartOnGroupJoin).toBe(false);
     expect(prefs.autoStartOnNewTopic).toBe(false);
     expect(prefs.autoStartOnGroupJoinPrompt).toBe('');
-    expect(prefs.regularGroupReplyMode).toBe('chat');
+    expect(prefs.regularGroupReplyMode).toBe('shared');
     expect(prefs.regularGroupMentionMode).toBe('always');
   });
 
@@ -93,7 +93,7 @@ describe('card-prefs store — 主动开工 fields', () => {
     expect(disk.autoStartOnGroupJoin).toBe(true);
     expect(disk.autoStartOnNewTopic).toBe(true);
     expect(disk.autoStartOnGroupJoinPrompt).toBe('  先做代码审查再回答 ');
-    expect(disk.regularGroupReplyMode).toBe('shared');
+    expect(disk.regularGroupReplyMode).toBeUndefined();
     expect(disk.regularGroupMentionMode).toBe('never');
 
     // In-memory registry synced (routing reads bot.config directly, no restart)
@@ -101,11 +101,11 @@ describe('card-prefs store — 主动开工 fields', () => {
     expect(cfg.autoStartOnGroupJoin).toBe(true);
     expect(cfg.autoStartOnNewTopic).toBe(true);
     expect(cfg.autoStartOnGroupJoinPrompt).toBe('  先做代码审查再回答 ');
-    expect(cfg.regularGroupReplyMode).toBe('shared');
+    expect(cfg.regularGroupReplyMode).toBeUndefined();
     expect(cfg.regularGroupMentionMode).toBe('never');
   });
 
-  it('removes keys when toggled off / prompt blanked (keeps bots.json tidy)', async () => {
+  it('stores explicit chat opt-out and removes shared default / blank prompt (keeps bots.json tidy)', async () => {
     writeConfig({
       autoStartOnGroupJoin: true,
       autoStartOnGroupJoinPrompt: '旧的 prompt',
@@ -126,13 +126,22 @@ describe('card-prefs store — 主动开工 fields', () => {
     expect(disk.autoStartOnGroupJoin).toBeUndefined();
     expect(disk.autoStartOnNewTopic).toBeUndefined();
     expect(disk.autoStartOnGroupJoinPrompt).toBeUndefined();
-    expect(disk.regularGroupReplyMode).toBeUndefined();
+    expect(disk.regularGroupReplyMode).toBe('chat');
 
     const cfg = registry.getBot('app_default').config;
     expect(cfg.autoStartOnGroupJoin).toBeUndefined();
     expect(cfg.autoStartOnNewTopic).toBeUndefined();
     expect(cfg.autoStartOnGroupJoinPrompt).toBeUndefined();
-    expect(cfg.regularGroupReplyMode).toBeUndefined();
+    expect(cfg.regularGroupReplyMode).toBe('chat');
+
+    await store.updateBotCardPrefs('app_default', {
+      regularGroupReplyMode: 'shared',
+    });
+
+    const diskAfterShared = readConfig();
+    expect(diskAfterShared.regularGroupReplyMode).toBeUndefined();
+    const cfgAfterShared = registry.getBot('app_default').config;
+    expect(cfgAfterShared.regularGroupReplyMode).toBeUndefined();
   });
 
   it('partial patch leaves untouched fields intact', async () => {

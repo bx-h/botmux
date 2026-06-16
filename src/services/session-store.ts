@@ -5,7 +5,7 @@ import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
 import { mergePendingResponseState } from '../core/pending-response.js';
 import { deleteFrozenCards } from './frozen-card-store.js';
-import type { Session } from '../types.js';
+import { effectiveSessionScope, type Session } from '../types.js';
 
 let sessions: Map<string, Session> = new Map();
 let loaded = false;
@@ -210,7 +210,7 @@ export function findActiveSessionsByRoot(rootMessageId: string): Session[] {
  * are routed by rootMessageId and not eligible for chat-scope inheritance.
  */
 export function findActiveChatScopeSessionsByChat(chatId: string): Session[] {
-  return findActiveSessionsMatching(s => s.chatId === chatId && s.scope === 'chat');
+  return findActiveSessionsMatching(s => s.chatId === chatId && effectiveSessionScope(s) === 'chat');
 }
 
 /**

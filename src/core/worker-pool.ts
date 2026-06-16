@@ -39,7 +39,7 @@ import { emitSessionLifecycleHook, emitSessionStateTransitionHook } from '../ser
 import { anchorUsageForDaemonSession, recordOwnershipForDaemonSession, recordUsageForDaemonSession, reconcileUsageForDaemonSession } from '../services/usage-ledger.js';
 import type { CliId } from '../adapters/cli/types.js';
 import type { DaemonToWorker, WorkerToDaemon, Session, DisplayMode } from '../types.js';
-import { sessionKey, sessionAnchorId, type DaemonSession } from './types.js';
+import { effectiveDaemonSessionScope, sessionKey, sessionAnchorId, type DaemonSession } from './types.js';
 import { claimPendingResponseCard, COMPLETED_REACTION_EMOJI_TYPE, markPendingResponseCardPatchedIfCurrent, syncPendingResponseState } from './pending-response.js';
 import { buildTerminalUrl } from './terminal-url.js';
 import { usageLimitStateKey, type CliUsageLimitState } from '../utils/cli-usage-limit.js';
@@ -676,7 +676,7 @@ export async function deliverEphemeralOrReply(
   msgType: 'text' | 'interactive',
   reply: () => Promise<unknown>,
 ): Promise<void> {
-  if (operatorOpenId && ds.chatType !== 'p2p' && ds.scope === 'chat') {
+  if (operatorOpenId && ds.chatType !== 'p2p' && effectiveDaemonSessionScope(ds) === 'chat') {
     try {
       // The ephemeral API is card-only (msg_type=text → 10003), so wrap a plain
       // confirmation line into a minimal markdown card.

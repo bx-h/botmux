@@ -1,4 +1,4 @@
-import type { DaemonSession } from './types.js';
+import { effectiveDaemonSessionScope, type DaemonSession } from './types.js';
 import type { Session } from '../types.js';
 
 export type SessionReplyTarget =
@@ -6,11 +6,13 @@ export type SessionReplyTarget =
   | { mode: 'thread'; rootMessageId: string };
 
 export function resolveSessionReplyTarget(
-  ds: Pick<DaemonSession, 'scope' | 'chatId' | 'session' | 'currentReplyTarget'>,
+  ds: Pick<DaemonSession, 'scope' | 'chatId' | 'session' | 'currentReplyTarget' | 'replyTurnTargets'>,
   turnId?: string,
 ): SessionReplyTarget {
   const target = ds.currentReplyTarget ?? ds.session.currentReplyTarget;
-  if (ds.scope === 'chat') {
+  const turnTarget = turnId ? (ds.replyTurnTargets ?? ds.session.replyTurnTargets)?.[turnId] : undefined;
+  if (effectiveDaemonSessionScope(ds) === 'chat') {
+    if (turnTarget?.rootMessageId) return { mode: 'thread', rootMessageId: turnTarget.rootMessageId };
     if (target?.rootMessageId && !!turnId && target.turnId === turnId) {
       return { mode: 'thread', rootMessageId: target.rootMessageId };
     }
@@ -27,11 +29,15 @@ export function resolveSendTarget(opts: {
   rootMessageId: string;
   replyTargetRootId?: string;
   replyTargetTurnId?: string;
+  replyTurnTargetRootId?: string;
   currentTurnId?: string;
 }): SessionReplyTarget {
   if (opts.into) return { mode: 'thread', rootMessageId: opts.into };
   if (opts.topLevel) return { mode: 'plain', chatId: opts.chatId };
   if (opts.chatScope) {
+    if (opts.currentTurnId && opts.replyTurnTargetRootId) {
+      return { mode: 'thread', rootMessageId: opts.replyTurnTargetRootId };
+    }
     return opts.replyTargetRootId && opts.replyTargetTurnId && opts.replyTargetTurnId === opts.currentTurnId
       ? { mode: 'thread', rootMessageId: opts.replyTargetRootId }
       : { mode: 'plain', chatId: opts.chatId };
@@ -45,17 +51,21 @@ export function beginReplyTargetTurn(
   turnId: string,
   nowIso = new Date().toISOString(),
 ): void {
-  if (ds.scope !== 'chat') return;
+  if (effectiveDaemonSessionScope(ds) !== 'chat') return;
   if (replyRootId) {
     const aliases = { ...(ds.replyThreadAliases ?? ds.session.replyThreadAliases ?? {}) };
     aliases[replyRootId] = {
       createdAt: aliases[replyRootId]?.createdAt ?? nowIso,
       lastUsedAt: nowIso,
     };
+    const turnTargets = { ...(ds.replyTurnTargets ?? ds.session.replyTurnTargets ?? {}) };
+    turnTargets[turnId] = { rootMessageId: replyRootId, updatedAt: nowIso };
     const target = { rootMessageId: replyRootId, turnId, updatedAt: nowIso };
     ds.replyThreadAliases = aliases;
+    ds.replyTurnTargets = turnTargets;
     ds.currentReplyTarget = target;
     ds.session.replyThreadAliases = aliases;
+    ds.session.replyTurnTargets = turnTargets;
     ds.session.currentReplyTarget = target;
     return;
   }
@@ -82,5 +92,6 @@ export function fallbackTurnId(
 export function syncReplyTargetState(ds: DaemonSession, s?: Session): void {
   const source = s ?? ds.session;
   ds.replyThreadAliases = source.replyThreadAliases;
+  ds.replyTurnTargets = source.replyTurnTargets;
   ds.currentReplyTarget = source.currentReplyTarget;
 }

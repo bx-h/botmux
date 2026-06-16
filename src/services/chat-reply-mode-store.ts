@@ -11,7 +11,7 @@
  *                    thread-scope session under the trigger (its own worker/cwd/context).
  *
  * Resolution: per-chat override (`chatReplyModes[chatId]`) wins; otherwise fall
- * back to the per-bot default (`regularGroupReplyMode`, default 'chat'). The
+ * back to the per-bot default (`regularGroupReplyMode`, default 'shared'). The
  * setting is bot-scoped: Bot A can prefer topic replies in one group while Bot B
  * or another group stays flat.
  */
@@ -35,12 +35,12 @@ export function replyModeLabel(mode: ChatReplyMode): 'chat' | 'topic' | 'new-top
   return mode === 'shared' ? 'topic' : mode === 'new-topic' ? 'new-topic' : 'chat';
 }
 
-/** Per-bot default regular-group mode (`regularGroupReplyMode`, default 'chat'). */
+/** Per-bot default regular-group mode (`regularGroupReplyMode`, default 'shared'). */
 function regularGroupDefaultMode(larkAppId: string): ChatReplyMode {
   try {
-    return getBot(larkAppId).config.regularGroupReplyMode ?? 'chat';
+    return getBot(larkAppId).config.regularGroupReplyMode ?? 'shared';
   } catch {
-    return 'chat';
+    return 'shared';
   }
 }
 

@@ -1026,9 +1026,11 @@ async function maybeApplySharedTopicSeed(input: {
   messageId: string;
   routing: { scope: 'thread' | 'chat'; anchor: string };
   forceTopicApplied?: boolean;
+  ownsThreadSession?: boolean;
 }): Promise<string | undefined> {
-  const { larkAppId, chatId, chatType, message, senderOpenId, messageId, routing, forceTopicApplied } = input;
+  const { larkAppId, chatId, chatType, message, senderOpenId, messageId, routing, forceTopicApplied, ownsThreadSession } = input;
   if (forceTopicApplied) return undefined;
+  if (ownsThreadSession) return undefined;
   if (chatType !== 'group') return undefined;
   if (resolveRegularGroupMode(larkAppId, chatId) !== 'shared') return undefined;
   // Seeding a shared topic normally needs an @mention. But under the 'never'
@@ -1117,8 +1119,9 @@ type RoutingDecision = {
 function regularGroupRouting(larkAppId: string, messageId: string, chatId: string): RoutingDecision {
   // tri-state: only `new-topic` forks a fresh thread-scope session. `shared`
   // stays chat-scope here (the topic fold happens post-routing, see
-  // maybeApplySharedTopicSeed); `chat` is the flat default. resolveRegularGroupMode
-  // is the single decision point so new-topic and shared never both fire.
+  // maybeApplySharedTopicSeed); `chat` is the explicit flat opt-out.
+  // resolveRegularGroupMode is the single decision point so new-topic and
+  // shared never both fire.
   if (resolveRegularGroupMode(larkAppId, chatId) === 'new-topic') {
     return { scope: 'thread', anchor: messageId, source: 'regular-group-thread' };
   }
@@ -1280,7 +1283,7 @@ export function startLarkEventDispatcher(larkAppId: string, larkAppSecret: strin
           });
           if (!replyRootId) {
             replyRootId = await maybeApplySharedTopicSeed({
-              larkAppId, chatId, chatType, message, senderOpenId, messageId, routing: ctx, forceTopicApplied: forcedTopic,
+              larkAppId, chatId, chatType, message, senderOpenId, messageId, routing: ctx, forceTopicApplied: forcedTopic, ownsThreadSession,
             });
           }
           // Regular-group foreign-bot @mention: gate to vetted botmux peers
@@ -1467,7 +1470,7 @@ export function startLarkEventDispatcher(larkAppId: string, larkAppSecret: strin
           ownsSession = handlers.isSessionOwner?.(routing.anchor, larkAppId) ?? false;
         } else {
           const seedReplyRootId = await maybeApplySharedTopicSeed({
-            larkAppId, chatId, chatType, message, senderOpenId, messageId, routing, forceTopicApplied,
+            larkAppId, chatId, chatType, message, senderOpenId, messageId, routing, forceTopicApplied, ownsThreadSession: ownsThreadSessionBeforeFold,
           });
           if (seedReplyRootId) {
             replyRootId = seedReplyRootId;

@@ -5,8 +5,8 @@
 // `session.spawned` / `session.update` lifecycle events).  Lives in its own
 // module so worker-pool can import the composer without pulling in the IPC
 // server (which itself imports worker-pool — that would be a cycle).
-import type { DaemonSession } from './types.js';
-import type { Session, StreamStatus } from '../types.js';
+import { effectiveDaemonSessionScope, type DaemonSession } from './types.js';
+import { effectiveSessionScope, type Session, type StreamStatus } from '../types.js';
 import type { CliId } from '../adapters/cli/types.js';
 import { getTerminalAdvertisedPort } from './terminal-url.js';
 import { getBotBrand } from '../bot-registry.js';
@@ -107,7 +107,7 @@ export function composeRowFromActive(ds: DaemonSession): SessionRow {
     workingDir: ds.workingDir,
     chatId: ds.chatId,
     rootMessageId: ds.session.rootMessageId,
-    scope: ds.session.scope,
+    scope: effectiveDaemonSessionScope(ds),
     title: ds.session.title,
     kanbanColumn: ds.session.kanbanColumn,
     kanbanPosition: ds.session.kanbanPosition,
@@ -145,7 +145,7 @@ export function composeRowFromClosed(s: Session): SessionRow {
     workingDir: s.workingDir,
     chatId: s.chatId,
     rootMessageId: s.rootMessageId,
-    scope: s.scope,
+    scope: effectiveSessionScope(s),
     title: s.title,
     kanbanColumn: s.kanbanColumn,
     kanbanPosition: s.kanbanPosition,

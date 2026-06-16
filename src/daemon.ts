@@ -29,13 +29,13 @@ import { buildQuoteHint } from './im/lark/quote-hint.js';
 import { logger } from './utils/logger.js';
 import { BoundedMap } from './utils/bounded-map.js';
 import { checkAllowedChatGroupsConfig } from './services/allowed-chat-groups.js';
-import type { Session } from './types.js';
+import { effectiveSessionScope, type Session } from './types.js';
 import { ensureCjkFontsInstalled } from './utils/font-installer.js';
 import { invalidWorkingDirs } from './utils/working-dir.js';
 import type { DaemonToWorker, LarkMessage } from './types.js';
 export type { DaemonSession } from './core/types.js';
 import type { DaemonSession } from './core/types.js';
-import { sessionKey, sessionAnchorId } from './core/types.js';
+import { effectiveDaemonSessionScope, sessionKey, sessionAnchorId } from './core/types.js';
 import { buildTerminalUrl, setTerminalProxyPort, setTerminalExternalPort } from './core/terminal-url.js';
 import { startTerminalProxy, type TerminalProxyHandle } from './core/terminal-proxy.js';
 import type { CliId } from './adapters/cli/types.js';
@@ -154,19 +154,19 @@ import { createLarkAskCardDispatcher } from './im/lark/ask-card.js';
 const activeSessions = new Map<string, DaemonSession>();
 const workflowEventWatchers = new Map<string, WorkflowEventWatcher>();
 
-function sessionHasReplyThreadAlias(s: Pick<Session, 'scope' | 'replyThreadAliases'>, rootId: string): boolean {
-  return s.scope === 'chat' && !!s.replyThreadAliases?.[rootId];
+function sessionHasReplyThreadAlias(s: Pick<Session, 'scope' | 'chatId' | 'rootMessageId' | 'replyThreadAliases'>, rootId: string): boolean {
+  return effectiveSessionScope(s) === 'chat' && !!s.replyThreadAliases?.[rootId];
 }
 
 function findChatReplyAlias(rootId: string, chatId: string, larkAppId: string): { chatId: string; sessionId: string } | null {
   // A real thread-scope session at this root wins over any historical alias.
   if (activeSessions.get(sessionKey(rootId, larkAppId))?.scope === 'thread') return null;
   for (const ds of activeSessions.values()) {
-    if (ds.larkAppId !== larkAppId || ds.scope !== 'chat' || ds.chatId !== chatId) continue;
+    if (ds.larkAppId !== larkAppId || effectiveDaemonSessionScope(ds) !== 'chat' || ds.chatId !== chatId) continue;
     if (sessionHasReplyThreadAlias(ds.session, rootId)) return { chatId: ds.chatId, sessionId: ds.session.sessionId };
   }
   const diskSessions = sessionStore.listSessions();
-  if (diskSessions.some(s => s.status === 'active' && s.larkAppId === larkAppId && s.scope !== 'chat' && s.rootMessageId === rootId)) {
+  if (diskSessions.some(s => s.status === 'active' && s.larkAppId === larkAppId && effectiveSessionScope(s) !== 'chat' && s.rootMessageId === rootId)) {
     return null;
   }
   const hit = diskSessions.find(s => s.status === 'active' && s.larkAppId === larkAppId && s.chatId === chatId && sessionHasReplyThreadAlias(s, rootId));
@@ -399,7 +399,7 @@ async function sessionReply(anchor: string, content: string, msgType: string = '
   if (!appId) throw new Error('No bot configured');
   const hookContext = ds ? {
     sessionId: ds.session.sessionId,
-    scope: ds.scope,
+    scope: effectiveDaemonSessionScope(ds),
     anchor: sessionAnchorId(ds),
   } : undefined;
 
@@ -417,9 +417,10 @@ async function sessionReply(anchor: string, content: string, msgType: string = '
   // from activeSessions BEFORE sending the close-confirmation reply, so by
   // the time we run, ds is gone — but the anchor (chatId, oc_xxx) is enough
   // to know we should sendMessage, not reply_in_thread to a non-message-id.
-  if (ds?.scope === 'chat' || anchor.startsWith('oc_')) {
+  const isChatScope = ds ? effectiveDaemonSessionScope(ds) === 'chat' : anchor.startsWith('oc_');
+  if (isChatScope) {
     const chatId = ds?.chatId ?? anchor;
-    if (ds?.scope === 'chat') {
+    if (ds && effectiveDaemonSessionScope(ds) === 'chat') {
       const fresh = readSessionFreshFromDisk(ds.session.sessionId, ds.larkAppId);
       if (fresh) syncReplyTargetState(ds, fresh);
       const target = resolveSessionReplyTarget(ds, turnId);
@@ -3065,7 +3066,7 @@ async function handleThreadReply(data: any, ctx: RoutingContext): Promise<void> 
     const mentionedThisBot = isBotMentioned(larkAppId, data?.message ?? {}, data?.sender?.sender_id?.open_id);
     const hasOtherBot = [...activeSessions.values()].some(s => {
       if (s.larkAppId === larkAppId) return false;
-      if (s.scope === 'chat') return s.chatId === ctxChatId && scope === 'chat';
+      if (effectiveDaemonSessionScope(s) === 'chat') return s.chatId === ctxChatId && scope === 'chat';
       return s.session.rootMessageId === anchor;
     });
     if (hasOtherBot && !mentionedThisBot) {

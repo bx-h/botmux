@@ -29,7 +29,7 @@ import { createRequire } from 'node:module';
 import { createHmac, randomBytes } from 'node:crypto';
 import { validateWorkingDir } from './core/working-dir.js';
 import { findAncestorSessionContext as findAncestorSessionContextFromMarkers } from './core/session-marker.js';
-import { parseDispatchBotSpec, buildDispatchMessages, buildRepoPrimeText, buildReportContent, eligibleAutoMentionAliases, offTopicSubBotTopic, resolveReportTarget, resolveSendTarget } from './core/dispatch.js';
+import { parseDispatchBotSpec, buildDispatchMessages, buildRepoPrimeText, buildReportContent, eligibleAutoMentionAliases, offTopicSubBotTopic, resolveReportTarget, resolveReportTopicTarget, resolveSendTarget } from './core/dispatch.js';
 import { enableAutostart, disableAutostart, autostartStatus, refreshAutostart } from './autostart.js';
 import { tmuxEnv } from './setup/ensure-tmux.js';
 import { writeBotsJsonAtomic as writeBotsAtomic } from './setup/bots-store.js';
@@ -74,6 +74,7 @@ import { mergeGlobalConfig, readGlobalConfig, setGlobalLocale, globalConfigPath,
 import { detectWorkerResources, resolveWorkerBudget } from './core/worker-budget.js';
 import { buildBridgeSendMarkerContent } from './services/bridge-fallback-gate.js';
 import { writeManualIntentIfAbsentTo } from './services/restart-intent-store.js';
+import { effectiveSessionScope } from './types.js';
 
 // Resolve the CLI's UI locale once from the global config file, so subsequent
 // CLI output (and any t() callers that don't pass an explicit locale) honour
@@ -1541,6 +1542,7 @@ interface SessionData {
   lastCallerOpenId?: string;
   /** Chat-scope quote chain — see Session.quoteTargetId in types.ts. */
   quoteTargetId?: string;
+  replyTurnTargets?: { [turnId: string]: { rootMessageId: string; updatedAt: string } };
   currentReplyTarget?: { rootMessageId: string; turnId: string; updatedAt: string };
   quoteTargetSenderOpenId?: string;
   quoteTargetSenderIsBot?: boolean;
@@ -2982,7 +2984,7 @@ async function cmdHistory(rest: string[]): Promise<void> {
     // lets a thread-scope session intentionally read outside its thread when
     // it needs the surrounding group conversation (for example `/t` spawned
     // from an ongoing 普通群 discussion).
-    const isChatScope = s.scope === 'chat';
+    const isChatScope = effectiveSessionScope(s) === 'chat';
     const effectiveScope = scopeArg === 'session'
       ? (isChatScope ? 'chat' : 'thread')
       : scopeArg;
@@ -3307,6 +3309,8 @@ async function cmdSend(rest: string[]): Promise<void> {
   const s = sessions.get(sid);
   if (!s) { console.error(`未找到 session ${sid}`); process.exit(1); }
   if (!s.larkAppId) { console.error(`session ${sid} 缺少 larkAppId`); process.exit(1); }
+  const isChatScope = effectiveSessionScope(s) === 'chat';
+  const replyTurnTargetRootId = currentTurnId ? s.replyTurnTargets?.[currentTurnId]?.rootMessageId : undefined;
 
   // Read content from: --content-file > positional arg > stdin
   let content = '';
@@ -3354,7 +3358,7 @@ async function cmdSend(rest: string[]): Promise<void> {
     const { rmSync } = await import('node:fs');
     const appId = s.larkAppId!;
     const targetChatId = overrideChatId ?? s.chatId;
-    const target = resolveSendTarget({ into: sendInto, topLevel: sendTopLevel, chatScope: s.scope === 'chat', chatId: targetChatId, rootMessageId: s.rootMessageId, replyTargetRootId: s.currentReplyTarget?.rootMessageId, replyTargetTurnId: s.currentReplyTarget?.turnId, currentTurnId });
+    const target = resolveSendTarget({ into: sendInto, topLevel: sendTopLevel, chatScope: isChatScope, chatId: targetChatId, rootMessageId: s.rootMessageId, replyTargetRootId: s.currentReplyTarget?.rootMessageId, replyTargetTurnId: s.currentReplyTarget?.turnId, replyTurnTargetRootId, currentTurnId });
     const sendAudio = (fileKey: string): Promise<string> =>
       target.mode === 'plain'
         ? sendMessage(appId, target.chatId, JSON.stringify({ file_key: fileKey }), 'audio')
@@ -3437,8 +3441,6 @@ async function cmdSend(rest: string[]): Promise<void> {
   // Chat-scope sessions (普通群整群一会话) post to chatId without
   // reply_in_thread, otherwise Lark would force every reply into a fresh
   // topic — defeating the whole point of chat-scope routing.
-  const isChatScope = s.scope === 'chat';
-
   // ── Footgun guard: orchestrator → sub-bot ──
   // A dispatched sub-bot's session lives in its sub-topic; @-ing it from the main
   // chat spawns a fresh, context-less one. The check is computed ONCE and applied
@@ -3453,7 +3455,7 @@ async function cmdSend(rest: string[]): Promise<void> {
   const dispatchActiveSeeds = new Set<string>();
   if (Object.keys(dispatchReg).length > 0) {
     for (const sess of loadSessions().values()) {
-      if (sess.status === 'active' && sess.scope !== 'chat' && sess.rootMessageId) {
+      if (sess.status === 'active' && effectiveSessionScope(sess) !== 'chat' && sess.rootMessageId) {
         dispatchActiveSeeds.add(sess.rootMessageId);
       }
     }
@@ -3494,7 +3496,7 @@ async function cmdSend(rest: string[]): Promise<void> {
   };
   // Dispatch helper: top-level / chat-scope send vs reply-in-thread, single
   // decision point. Used for file attachments (always plain in chat scope).
-  const sendTarget = resolveSendTarget({ into: sendInto, topLevel: sendTopLevel, chatScope: isChatScope, chatId: targetChatId, rootMessageId: s.rootMessageId, replyTargetRootId: s.currentReplyTarget?.rootMessageId, replyTargetTurnId: s.currentReplyTarget?.turnId, currentTurnId });
+  const sendTarget = resolveSendTarget({ into: sendInto, topLevel: sendTopLevel, chatScope: isChatScope, chatId: targetChatId, rootMessageId: s.rootMessageId, replyTargetRootId: s.currentReplyTarget?.rootMessageId, replyTargetTurnId: s.currentReplyTarget?.turnId, replyTurnTargetRootId, currentTurnId });
   const dispatch = (content: string, msgType: string): Promise<string> =>
     sendTarget.mode === 'plain'
       ? sendMessage(appId, sendTarget.chatId, content, msgType, undefined, hookContext)
@@ -4021,7 +4023,8 @@ async function cmdDispatch(rest: string[]): Promise<void> {
     process.exit(1);
   }
 
-  const sid = sessionIdArg ?? findAncestorSessionId();
+  const ancestorCtx = findAncestorSessionContext();
+  const sid = sessionIdArg ?? normalizeSessionIdValue(ancestorCtx?.sessionId);
   if (!sid) {
     console.error('无法推断 session-id。请在 Lark 话题内的 CLI 会话中运行，或传 --session-id <id>。');
     process.exit(1);
@@ -4030,6 +4033,16 @@ async function cmdDispatch(rest: string[]): Promise<void> {
   const s = sessions.get(sid);
   if (!s) { console.error(`未找到 session ${sid}`); process.exit(1); }
   if (!s.larkAppId) { console.error(`session ${sid} 缺少 larkAppId`); process.exit(1); }
+  const currentTurnId = ancestorCtx?.turnId ?? process.env.BOTMUX_TURN_ID;
+  const sessionScope = effectiveSessionScope(s);
+  const reportTopicTarget = resolveReportTopicTarget({
+    sessionScope,
+    sessionRootMessageId: s.rootMessageId,
+    currentReplyTargetRootId: s.currentReplyTarget?.rootMessageId,
+    currentReplyTargetTurnId: s.currentReplyTarget?.turnId,
+    replyTurnTargetRootId: currentTurnId ? s.replyTurnTargets?.[currentTurnId]?.rootMessageId : undefined,
+    currentTurnId,
+  });
 
   const targetChatId = overrideChatId ?? s.chatId;
   if (!targetChatId) { console.error(`session ${sid} 缺少 chatId，且未提供 --chat-id`); process.exit(1); }
@@ -4066,9 +4079,9 @@ async function cmdDispatch(rest: string[]): Promise<void> {
       let reg: Record<string, unknown> = {};
       try { if (existsSync(regPath)) reg = JSON.parse(readFileSync(regPath, 'utf-8')); } catch { /* corrupt → reset */ }
       reg[seedId] = {
-        orchRoot: s.rootMessageId ?? '',
+        orchRoot: reportTopicTarget?.rootMessageId ?? (sessionScope === 'thread' ? s.rootMessageId : ''),
         orchChatId: s.chatId,
-        orchScope: s.scope ?? 'thread',
+        orchScope: reportTopicTarget ? 'thread' : sessionScope,
         orchAppId: s.larkAppId,
         title: title.trim(),
         bots: built.mentionedOpenIds,
@@ -4163,7 +4176,8 @@ async function cmdReport(rest: string[]): Promise<void> {
     process.exit(1);
   }
 
-  const sid = sessionIdArg ?? findAncestorSessionId();
+  const ancestorCtx = findAncestorSessionContext();
+  const sid = sessionIdArg ?? normalizeSessionIdValue(ancestorCtx?.sessionId);
   if (!sid) {
     console.error('无法推断 session-id。请在被 dispatch 派活的会话里运行，或传 --session-id <id>。');
     process.exit(1);
@@ -4172,6 +4186,16 @@ async function cmdReport(rest: string[]): Promise<void> {
   const s = sessions.get(sid);
   if (!s) { console.error(`未找到 session ${sid}`); process.exit(1); }
   if (!s.larkAppId) { console.error(`session ${sid} 缺少 larkAppId`); process.exit(1); }
+  const currentTurnId = ancestorCtx?.turnId ?? process.env.BOTMUX_TURN_ID;
+  const sessionScope = effectiveSessionScope(s);
+  const sourceTopicTarget = resolveReportTopicTarget({
+    sessionScope,
+    sessionRootMessageId: s.rootMessageId,
+    currentReplyTargetRootId: s.currentReplyTarget?.rootMessageId,
+    currentReplyTargetTurnId: s.currentReplyTarget?.turnId,
+    replyTurnTargetRootId: currentTurnId ? s.replyTurnTargets?.[currentTurnId]?.rootMessageId : undefined,
+    currentTurnId,
+  });
 
   // Resolve where the report goes + who to @. Same-machine: the dispatch registry
   // (keyed by this sub-bot's thread root) carries the orchestrator's exact coords.
@@ -4182,7 +4206,10 @@ async function cmdReport(rest: string[]): Promise<void> {
   const regPath = join(resolveDataDir(), 'orchestrate-dispatch.json');
   let reg: Record<string, any> = {};
   try { if (existsSync(regPath)) reg = JSON.parse(readFileSync(regPath, 'utf-8')); } catch { /* */ }
-  const entry = s.rootMessageId ? reg[s.rootMessageId] : undefined;
+  const entryKey = [sourceTopicTarget?.rootMessageId, s.rootMessageId]
+    .filter((x): x is string => !!x)
+    .find((key) => !!reg[key]);
+  const entry = entryKey ? reg[entryKey] : undefined;
   const tgt = resolveReportTarget({
     registryEntry: entry,
     sessionChatId: s.chatId,
