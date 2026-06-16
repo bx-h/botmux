@@ -28,6 +28,7 @@ import { parseEventMessage, resolveNonsupportMessage, stripLeadingMentions, type
 import { expandMergeForward } from './im/lark/merge-forward.js';
 import { buildQuoteHint } from './im/lark/quote-hint.js';
 import { logger } from './utils/logger.js';
+import { buildLarkCliProfileWrapperContent } from './utils/lark-cli-profile-wrapper.js';
 import { BoundedMap } from './utils/bounded-map.js';
 import { checkAllowedChatGroupsConfig } from './services/allowed-chat-groups.js';
 import type { Session } from './types.js';
@@ -590,49 +591,6 @@ function writeExecutableIfChanged(path: string, content: string, label: string):
   }
 }
 
-function larkCliProfileWrapperContent(): string {
-  return `#!/bin/sh
-set -eu
-
-self_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
-real_cli=""
-old_ifs=$IFS
-IFS=:
-for dir in $PATH; do
-  [ -n "$dir" ] || dir=.
-  dir_abs=$(CDPATH= cd -- "$dir" 2>/dev/null && pwd -P) || continue
-  [ "$dir_abs" = "$self_dir" ] && continue
-  candidate="$dir_abs/lark-cli"
-  if [ -x "$candidate" ]; then
-    real_cli=$candidate
-    break
-  fi
-done
-IFS=$old_ifs
-
-if [ -z "$real_cli" ]; then
-  echo "botmux lark-cli wrapper: real lark-cli not found in PATH" >&2
-  exit 127
-fi
-
-has_profile_arg=0
-for arg in "$@"; do
-  case "$arg" in
-    --profile|--profile=*) has_profile_arg=1 ;;
-  esac
-done
-
-profile=\${BOTMUX_LARK_APP_ID:-}
-config=\${HOME:-}/.lark-cli/config.json
-if [ "$has_profile_arg" -eq 0 ] && [ -n "$profile" ] && [ -r "$config" ] &&
-   grep -Eq '"(name|appId)"[[:space:]]*:[[:space:]]*"'"$profile"'"' "$config"; then
-  exec "$real_cli" --profile "$profile" "$@"
-fi
-
-exec "$real_cli" "$@"
-`;
-}
-
 function writePidFile(): void {
   const dir = config.session.dataDir;
   if (!existsSync(dir)) {
@@ -657,7 +615,12 @@ function writePidFile(): void {
       `#!/bin/sh\nexec "${process.execPath}" "${cliScript}" "$@"\n`,
       'botmux',
     );
-    writeExecutableIfChanged(join(BOTMUX_BIN_DIR, 'lark-cli'), larkCliProfileWrapperContent(), 'lark-cli');
+    const larkCliWrapper = join(BOTMUX_BIN_DIR, 'lark-cli');
+    writeExecutableIfChanged(
+      larkCliWrapper,
+      buildLarkCliProfileWrapperContent({ nodePath: process.execPath, wrapperPath: larkCliWrapper }),
+      'lark-cli',
+    );
   } catch (err: any) {
     logger.warn(`Failed to write botmux bin wrapper script: ${err.message}`);
   }
