@@ -81,7 +81,6 @@ describe('attention signals', () => {
 
   it('composeRowFromActive carries the session scope (locate vs open-chat)', () => {
     const chatScoped = makeDs();
-    chatScoped.scope = 'chat';
     chatScoped.session.scope = 'chat';
     expect(composeRowFromActive(chatScoped).scope).toBe('chat');
 
@@ -89,13 +88,8 @@ describe('attention signals', () => {
     threadScoped.session.scope = 'thread';
     expect(composeRowFromActive(threadScoped).scope).toBe('thread');
 
-    // Restored legacy sessions are normalized from their anchor shape before
-    // becoming active rows, so the dashboard still opens the right target.
-    expect(composeRowFromActive(makeDs()).scope).toBe('thread');
-    const legacyChatScoped = makeDs();
-    legacyChatScoped.scope = 'chat';
-    legacyChatScoped.session.rootMessageId = legacyChatScoped.session.chatId;
-    expect(composeRowFromActive(legacyChatScoped).scope).toBe('chat');
+    // legacy sessions persisted before the scope field existed
+    expect(composeRowFromActive(makeDs()).scope).toBeUndefined();
   });
 
   it('publishAttentionPatch emits session.update derived from session state', () => {

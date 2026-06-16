@@ -67,9 +67,6 @@ export interface Session {
    * chat session when their rootMessageId is listed here.
    */
   replyThreadAliases?: { [rootMessageId: string]: { createdAt: string; lastUsedAt: string } };
-  /** Per-turn topic aliases. Lets delayed output from an older turn return to
-   *  that turn's original shared-topic root even if currentReplyTarget moved. */
-  replyTurnTargets?: { [turnId: string]: { rootMessageId: string; updatedAt: string } };
   /**
    * Current turn's reply destination for chat-scope topic aliases. `turnId` is
    * the inbound message_id that opened/updated this turn, preventing a stale
@@ -135,15 +132,6 @@ export interface Session {
     paneCols?: number;
     paneRows?: number;
   };
-}
-
-export function effectiveSessionScope(
-  session: Pick<Session, 'scope' | 'chatId' | 'rootMessageId'>,
-): 'thread' | 'chat' {
-  if (session.scope === 'chat' || session.scope === 'thread') return session.scope;
-  if (session.rootMessageId === session.chatId) return 'chat';
-  if (session.rootMessageId?.startsWith('oc_')) return 'chat';
-  return 'thread';
 }
 
 export interface LarkAttachment {

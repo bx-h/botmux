@@ -1,6 +1,6 @@
 import type { StreamStatus } from '../types.js';
 import type { DaemonSession } from '../core/types.js';
-import { effectiveDaemonSessionScope, sessionAnchorId } from '../core/types.js';
+import { sessionAnchorId } from '../core/types.js';
 import { emitHookEvent, type HookEvent } from './hook-runner.js';
 import { logger } from '../utils/logger.js';
 
@@ -25,7 +25,7 @@ function lifecyclePayload(ds: DaemonSession, body: Record<string, unknown>): Rec
     chatId: ds.chatId,
     chatType: ds.chatType,
     larkAppId: ds.larkAppId,
-    scope: effectiveDaemonSessionScope(ds),
+    scope: ds.scope,
     anchor: sessionAnchorId(ds),
     title: ds.currentTurnTitle ?? ds.session.title,
     cliId: ds.session.cliId ?? initCliId,

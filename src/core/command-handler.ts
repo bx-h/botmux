@@ -42,7 +42,7 @@ import { invalidWorkingDirs } from '../utils/working-dir.js';
 import { writeRoleFile, deleteRoleFile, resolveRole, resolveTeamRoleFile, writeTeamRoleFile, deleteTeamRoleFile } from './role-resolver.js';
 import { getBotCapability, setBotCapability, clearBotCapability } from '../services/bot-profile-store.js';
 import type { LarkMessage, DaemonToWorker } from '../types.js';
-import { effectiveDaemonSessionScope, sessionKey, sessionAnchorId } from './types.js';
+import { sessionKey, sessionAnchorId } from './types.js';
 import type { DaemonSession } from './types.js';
 import { t, localeForBot, type Locale } from '../i18n/index.js';
 
@@ -518,7 +518,7 @@ async function handleScheduleCommand(
   if (parsed) {
     const ds = larkAppId ? activeSessions.get(sessionKey(rootId, larkAppId)) : undefined;
     const workingDir = ds?.workingDir ?? (ds?.larkAppId ? getBot(ds.larkAppId).config.workingDir ?? '~' : getAllBots()[0]?.config.workingDir ?? '~');
-    const taskScope: 'thread' | 'chat' = ds && effectiveDaemonSessionScope(ds) === 'chat' ? 'chat' : 'thread';
+    const taskScope: 'thread' | 'chat' = ds?.scope === 'chat' ? 'chat' : 'thread';
     const task = scheduler.addTask({
       name: parsed.name,
       schedule: trimmed,

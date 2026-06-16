@@ -1,5 +1,5 @@
 import type { ChildProcess } from 'node:child_process';
-import { effectiveSessionScope, type Session, type DaemonToWorker, type LarkAttachment, type LarkMention, type DisplayMode, type StreamStatus } from '../types.js';
+import type { Session, DaemonToWorker, LarkAttachment, LarkMention, DisplayMode, StreamStatus } from '../types.js';
 import type { CliUsageLimitState } from '../utils/cli-usage-limit.js';
 
 /** Frozen card state — cached content for historical streaming cards that can still be toggled. */
@@ -102,7 +102,6 @@ export interface DaemonSession {
   lastUserPrompt?: string;
   lastCliInput?: string;
   replyThreadAliases?: { [rootMessageId: string]: { createdAt: string; lastUsedAt: string } };
-  replyTurnTargets?: { [turnId: string]: { rootMessageId: string; updatedAt: string } };
   currentReplyTarget?: { rootMessageId: string; turnId: string; updatedAt: string };
   pendingResponseCardId?: string; // placeholder card patched by the first botmux send when streaming cards are disabled
   pendingResponseCardState?: 'open' | 'patched';
@@ -168,16 +167,9 @@ export function sessionKey(anchorId: string, larkAppId: string): string {
   return `${anchorId}::${larkAppId}`;
 }
 
-export function effectiveDaemonSessionScope(
-  ds: Pick<DaemonSession, 'scope' | 'chatId' | 'session'>,
-): 'thread' | 'chat' {
-  if (ds.scope === 'chat' || ds.scope === 'thread') return ds.scope;
-  return effectiveSessionScope(ds.session);
-}
-
 /** Resolve the routing anchor for an active session — chatId for chat-scope
  *  sessions, rootMessageId for thread-scope. Used to compute `sessionKey()` at
  *  storage and lookup time. */
 export function sessionAnchorId(ds: DaemonSession): string {
-  return effectiveDaemonSessionScope(ds) === 'chat' ? ds.chatId : ds.session.rootMessageId;
+  return ds.scope === 'chat' ? ds.chatId : ds.session.rootMessageId;
 }

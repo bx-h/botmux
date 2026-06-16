@@ -59,8 +59,7 @@ import {
 } from './dashboard-rows.js';
 import { getBotBrand, getBot } from '../bot-registry.js';
 import { normalizeKanbanColumn, normalizeKanbanPosition, normalizeSessionTitle } from './session-board.js';
-import { effectiveSessionScope, type ScheduledTask, type ParsedSchedule, type Session } from '../types.js';
-import { effectiveDaemonSessionScope } from './types.js';
+import type { ScheduledTask, ParsedSchedule, Session } from '../types.js';
 
 export interface IpcServerHandle {
   port: number;
@@ -221,7 +220,7 @@ ipcRoute('GET', '/api/sessions/:sessionId/history', async (req, res, params) => 
   const url = new URL(req.url ?? '/', 'http://localhost');
   const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit') ?? '80', 10) || 80, 1), 200);
   try {
-    const raw = effectiveSessionScope(session) === 'chat'
+    const raw = session.scope === 'chat'
       ? await listChatMessages(appId, session.chatId, limit)
       : await listThreadMessages(appId, session.chatId, session.rootMessageId, limit);
     const messages = await Promise.all(raw.map(async (m: any) => {
@@ -248,7 +247,7 @@ ipcRoute('GET', '/api/sessions/:sessionId/history', async (req, res, params) => 
     );
     jsonRes(res, 200, {
       ok: true,
-      scope: effectiveSessionScope(session),
+      scope: session.scope ?? 'thread',
       ownerOpenId: session.ownerOpenId,
       messages: messages.map(m => {
         const p = m.senderType === 'user' ? senders.get(m.senderId) : null;
@@ -392,14 +391,14 @@ ipcRoute('POST', '/api/sessions/:sessionId/resume', async (_req, res, params) =>
   });
 
   // Notify the original chat so humans see why the session is alive again.
-  // Routing follows effective session scope — thread-scope replies into the thread root
+  // Routing follows session.scope — thread-scope replies into the thread root
   // (reply_in_thread=true), chat-scope posts a plain message to the chat (any
   // reply_in_thread call would silently get rejected or land on a stale root).
   const cliId = ds.session.cliId;
   const cliName = getCliDisplayName(cliId ?? 'claude-code');
   const notice = JSON.stringify({ text: `🔄 会话已通过命令行恢复，发条消息继续与 ${cliName} 对话。` });
   if (ds.larkAppId) {
-    if (effectiveDaemonSessionScope(ds) === 'chat' && ds.chatId) {
+    if (ds.scope === 'chat' && ds.chatId) {
       getChatMode(ds.larkAppId, ds.chatId, { forceRefresh: true })
         .then((mode) => mode === 'topic' && ds.session.rootMessageId
           ? replyMessage(ds.larkAppId, ds.session.rootMessageId, notice, 'text', true)
@@ -489,7 +488,7 @@ ipcRoute('POST', '/api/sessions/migrate-to-chat', async (req, res) => {
 
   let ds: ReturnType<typeof findActiveBySessionId> = undefined;
   for (const candidate of reg.values()) {
-    const candAnchor = effectiveDaemonSessionScope(candidate) === 'chat' ? candidate.chatId : candidate.session.rootMessageId;
+    const candAnchor = candidate.scope === 'chat' ? candidate.chatId : candidate.session.rootMessageId;
     if (candAnchor === sourceAnchor && candidate.larkAppId === cachedLarkAppId) {
       ds = candidate;
       break;

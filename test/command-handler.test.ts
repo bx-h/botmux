@@ -2054,11 +2054,6 @@ describe('handleCommand', () => {
 
     beforeEach(async () => {
       // Reset the cross-test stubs we manipulate here.
-      vi.mocked(getBot).mockImplementation(((id: string = 'app-1') => {
-        const bot = defaultGetBot(id);
-        (bot.config as any).regularGroupReplyMode = 'chat';
-        return bot;
-      }) as any);
       const wp = await import('../src/core/worker-pool.js');
       vi.mocked(wp.transferSession).mockReset();
       vi.mocked(wp.transferSession).mockResolvedValue({ ok: true });

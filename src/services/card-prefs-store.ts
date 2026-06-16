@@ -13,7 +13,7 @@
  *                                  of the group-visible live card
  *   • regularGroupReplyMode     — per-bot DEFAULT session mode for regular
  *                                  groups: chat | new-topic | shared (see
- *                                  chat-reply-mode-store). Default 'shared'.
+ *                                  chat-reply-mode-store). Default 'chat'.
  */
 import { rmwBotEntry } from './config-store.js';
 import { getBot, type ChatReplyMode } from '../bot-registry.js';
@@ -46,7 +46,7 @@ export function getBotCardPrefs(larkAppId: string): BotCardPrefs {
       autoStartOnGroupJoin: c.autoStartOnGroupJoin === true,
       autoStartOnGroupJoinPrompt: typeof c.autoStartOnGroupJoinPrompt === 'string' ? c.autoStartOnGroupJoinPrompt : '',
       autoStartOnNewTopic: c.autoStartOnNewTopic === true,
-      regularGroupReplyMode: c.regularGroupReplyMode ?? 'shared',
+      regularGroupReplyMode: c.regularGroupReplyMode ?? 'chat',
       regularGroupMentionMode: c.regularGroupMentionMode === 'topic' || c.regularGroupMentionMode === 'never'
         ? c.regularGroupMentionMode : 'always',
     };
@@ -58,7 +58,7 @@ export function getBotCardPrefs(larkAppId: string): BotCardPrefs {
       autoStartOnGroupJoin: false,
       autoStartOnGroupJoinPrompt: '',
       autoStartOnNewTopic: false,
-      regularGroupReplyMode: 'shared',
+      regularGroupReplyMode: 'chat',
       regularGroupMentionMode: 'always',
     };
   }
@@ -88,11 +88,11 @@ export async function updateBotCardPrefs(
     if (val.trim()) entry[key] = val;
     else delete entry[key];
   };
-  // Regular-group default mode: store only non-default modes. Missing means
-  // shared/topic; explicit chat is the opt-out to the old flat behavior.
+  // Regular-group default mode: store only the non-default modes; 'chat' (the
+  // default) drops the key so bots.json stays tidy (absent === 'chat').
   const applyMode = (entry: any, key: keyof BotCardPrefs, val: ChatReplyMode | undefined) => {
     if (val === undefined) return;
-    if (val === 'chat' || val === 'new-topic') entry[key] = val;
+    if (val === 'new-topic' || val === 'shared') entry[key] = val;
     else delete entry[key];
   };
   // 3-tier @ policy: store only the non-default tiers; 'always' (default) drops
@@ -121,9 +121,9 @@ export async function updateBotCardPrefs(
         autoStartOnGroupJoin: entry.autoStartOnGroupJoin === true,
         autoStartOnGroupJoinPrompt: typeof entry.autoStartOnGroupJoinPrompt === 'string' ? entry.autoStartOnGroupJoinPrompt : '',
         autoStartOnNewTopic: entry.autoStartOnNewTopic === true,
-        regularGroupReplyMode: (entry.regularGroupReplyMode === 'chat' || entry.regularGroupReplyMode === 'new-topic')
+        regularGroupReplyMode: (entry.regularGroupReplyMode === 'new-topic' || entry.regularGroupReplyMode === 'shared')
           ? entry.regularGroupReplyMode
-          : 'shared',
+          : 'chat',
         regularGroupMentionMode: (entry.regularGroupMentionMode === 'topic' || entry.regularGroupMentionMode === 'never')
           ? entry.regularGroupMentionMode
           : 'always',
@@ -152,7 +152,7 @@ export async function updateBotCardPrefs(
     bot.config.autoStartOnNewTopic = patch.autoStartOnNewTopic || undefined;
   }
   if (patch.regularGroupReplyMode !== undefined) {
-    bot.config.regularGroupReplyMode = (patch.regularGroupReplyMode === 'chat' || patch.regularGroupReplyMode === 'new-topic')
+    bot.config.regularGroupReplyMode = (patch.regularGroupReplyMode === 'new-topic' || patch.regularGroupReplyMode === 'shared')
       ? patch.regularGroupReplyMode
       : undefined;
   }

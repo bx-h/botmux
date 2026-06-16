@@ -731,11 +731,12 @@ export function parseBotConfigsFromText(jsonText: string): BotConfig[] {
         ? entry.autoStartOnGroupJoinPrompt
         : undefined,
       autoStartOnNewTopic: entry.autoStartOnNewTopic === true || undefined,
-      // Per-bot regular-group default mode. Missing means the product default
-      // ('shared'); explicit 'chat' is meaningful as an opt-out.
+      // Per-bot regular-group default mode. Only 'new-topic' | 'shared' are
+      // meaningful; 'chat' (the flat default) and anything else normalize to
+      // undefined so bots.json stays clean.
       regularGroupReplyMode: (() => {
         const mode = normalizeChatReplyModeConfig(entry.regularGroupReplyMode);
-        return mode;
+        return mode === 'new-topic' || mode === 'shared' ? mode : undefined;
       })(),
       // 3-tier @ policy. Only 'topic' | 'never' are meaningful; 'always' (the
       // default) and anything else normalize to undefined so bots.json stays clean.

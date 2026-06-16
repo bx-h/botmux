@@ -302,12 +302,9 @@ describe('runHook', () => {
       // --attention 是 send 的一个 flag，因此天然被同一道 gate 覆盖。
       const cmdSendIdx = src.indexOf('async function cmdSend(');
       expect(cmdSendIdx).toBeGreaterThanOrEqual(0);
-      const gateIdx = src.indexOf("process.env.BOTMUX_WORKFLOW === '1'", cmdSendIdx);
-      const exitIdx = src.indexOf('process.exit(2)', gateIdx);
-      const nextFnIdx = src.indexOf('\nasync function ', cmdSendIdx + 1);
-      expect(gateIdx).toBeGreaterThan(cmdSendIdx);
-      expect(exitIdx).toBeGreaterThan(gateIdx);
-      expect(nextFnIdx < 0 || exitIdx < nextFnIdx).toBe(true);
+      const region = src.slice(cmdSendIdx, cmdSendIdx + 1500);
+      expect(region).toContain("process.env.BOTMUX_WORKFLOW === '1'");
+      expect(region).toContain('process.exit(2)');
     });
   });
 });

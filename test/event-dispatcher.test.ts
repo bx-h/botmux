@@ -533,7 +533,7 @@ describe('im.message.receive_v1 — bot-to-bot @mention routing', () => {
     // 它必须排在 vetting gate 之后。否则随机第三方 bot 发 `@bot /t …` 会让闸门
     // 的 `ctx.scope === 'chat' || source === 'regular-group-thread'` 两条件全 false
     // → 绕过 vetting → 静默 spawn 一个 thread-scope 会话。这条用例锁死「不能绕」。
-    mockGetChatMode.mockResolvedValueOnce('group');  // 普通群, regularGroupReplyMode unset(shared) → source=regular-group-chat
+    mockGetChatMode.mockResolvedValueOnce('group');  // 普通群, regularGroupReplyMode unset(chat) → source=regular-group-chat
     mockReadFileSync.mockReturnValue('{}');  // empty cross-ref → unknown peer
     const event = makeBotMessageEvent({
       senderOpenId: OTHER_BOT_OPEN_ID,
@@ -2125,7 +2125,6 @@ describe('im.message.receive_v1 — /t force-topic override', () => {
   });
 
   it('does NOT flip when scope is already thread (e.g. real Lark 话题 in 普通群)', async () => {
-    setupBotState({ regularGroupReplyMode: 'new-topic' });
     const event = makeUserMessageEvent({
       senderOpenId: USER_OPEN_ID,
       content: JSON.stringify({ text: '@BotA /t inside an existing thread' }),
@@ -2837,8 +2836,6 @@ describe('im.message.receive_v1 — ack-safe duplicate delivery', () => {
   });
 
   it('processes two id-less events instead of dropping one (fallback key never collides)', async () => {
-    setupBotState({ regularGroupReplyMode: 'chat' });
-    mockGetChatMode.mockResolvedValue('group');
     const makeIdless = (text: string) => {
       const e = makeUserMessageEvent({
         senderOpenId: USER_OPEN_ID,
@@ -2953,7 +2950,7 @@ describe('im.message.receive_v1 — botOpenId startup race', () => {
   it('processes a foreign-bot @ that arrives before botOpenId is probed (does not silently drop it)', async () => {
     // Just-restarted daemon: probeBotOpenId still in flight, botOpenId unset.
     const botState: any = {
-      config: { larkAppId: MY_APP_ID, larkAppSecret: 'secret', cliId: 'claude-code', regularGroupReplyMode: 'new-topic' },
+      config: { larkAppId: MY_APP_ID, larkAppSecret: 'secret', cliId: 'claude-code' },
       botOpenId: undefined,
       resolvedAllowedUsers: [],
     };

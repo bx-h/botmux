@@ -228,32 +228,6 @@ export function resolveReportTarget(input: {
   };
 }
 
-export function resolveReportTopicTarget(input: {
-  sessionScope: 'thread' | 'chat';
-  sessionRootMessageId: string;
-  currentReplyTargetRootId?: string;
-  currentReplyTargetTurnId?: string;
-  replyTurnTargetRootId?: string;
-  currentTurnId?: string;
-}): { mode: 'thread'; rootMessageId: string } | null {
-  if (input.sessionScope === 'thread') {
-    return input.sessionRootMessageId
-      ? { mode: 'thread', rootMessageId: input.sessionRootMessageId }
-      : null;
-  }
-  if (input.currentTurnId && input.replyTurnTargetRootId) {
-    return { mode: 'thread', rootMessageId: input.replyTurnTargetRootId };
-  }
-  if (
-    input.currentTurnId &&
-    input.currentReplyTargetRootId &&
-    input.currentReplyTargetTurnId === input.currentTurnId
-  ) {
-    return { mode: 'thread', rootMessageId: input.currentReplyTargetRootId };
-  }
-  return null;
-}
-
 /**
  * The footgun check shared by `botmux send`'s explicit-mention guard AND its
  * prose `@Name` auto-injection: returns the sub-topic seed if `mentionOpenId` is

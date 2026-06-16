@@ -1383,7 +1383,7 @@ export function buildRelayPickerCard(
   /** Target routing scope baked into every button value so the confirm /
    *  re-render handlers know whether to land the relayed session as a 话题
    *  (thread, reply_in_thread to `root_id`) or flat chat-scope. Default 'chat'
-   *  preserves compatibility for legacy cards rendered before this field. */
+   *  preserves the legacy普通群-flat behavior. */
   targetScope: 'thread' | 'chat' = 'chat',
   /** Target chat type baked into every button value so relay_confirm can pass
    *  the right chatType to transferSession (a DM target must flip the session
