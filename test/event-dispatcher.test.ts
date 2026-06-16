@@ -535,7 +535,7 @@ describe('im.message.receive_v1 — bot-to-bot @mention routing', () => {
     // 它必须排在 vetting gate 之后。否则随机第三方 bot 发 `@bot /t …` 会让闸门
     // 的 `ctx.scope === 'chat' || source === 'regular-group-thread'` 两条件全 false
     // → 绕过 vetting → 静默 spawn 一个 thread-scope 会话。这条用例锁死「不能绕」。
-    mockGetChatMode.mockResolvedValueOnce('group');  // 普通群, regularGroupReplyMode unset(chat) → source=regular-group-chat
+    mockGetChatMode.mockResolvedValueOnce('group');  // 普通群；unknown peer is dropped before new-topic routing can spawn.
     mockReadFileSync.mockReturnValue('{}');  // empty cross-ref → unknown peer
     const event = makeBotMessageEvent({
       senderOpenId: OTHER_BOT_OPEN_ID,
