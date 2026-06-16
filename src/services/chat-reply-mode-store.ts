@@ -3,7 +3,7 @@
  *
  * Three modes (tri-state) — unifies #116 + #131 into one knob so a chat resolves
  * to EXACTLY ONE mode and the two thread-reply mechanisms can never compete:
- *   • chat        — flat chat-scope replies in the group (default).
+ *   • chat        — flat chat-scope replies in the group.
  *   • topic/shared — 话题展示但复用同一个 session: reuse the bot's existing
  *                    chat-scope session/worker/cwd, but route this turn's reply
  *                    into the trigger message's thread (#131).
@@ -11,7 +11,7 @@
  *                    thread-scope session under the trigger (its own worker/cwd/context).
  *
  * Resolution: per-chat override (`chatReplyModes[chatId]`) wins; otherwise fall
- * back to the per-bot default (`regularGroupReplyMode`, default 'chat'). The
+ * back to the per-bot default (`regularGroupReplyMode`, default 'new-topic'). The
  * setting is bot-scoped: Bot A can prefer topic replies in one group while Bot B
  * or another group stays flat.
  */
@@ -35,12 +35,12 @@ export function replyModeLabel(mode: ChatReplyMode): 'chat' | 'topic' | 'new-top
   return mode === 'shared' ? 'topic' : mode === 'new-topic' ? 'new-topic' : 'chat';
 }
 
-/** Per-bot default regular-group mode (`regularGroupReplyMode`, default 'chat'). */
+/** Per-bot default regular-group mode (`regularGroupReplyMode`, default 'new-topic'). */
 function regularGroupDefaultMode(larkAppId: string): ChatReplyMode {
   try {
-    return getBot(larkAppId).config.regularGroupReplyMode ?? 'chat';
+    return getBot(larkAppId).config.regularGroupReplyMode ?? 'new-topic';
   } catch {
-    return 'chat';
+    return 'new-topic';
   }
 }
 

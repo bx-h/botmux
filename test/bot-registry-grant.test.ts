@@ -107,13 +107,14 @@ describe('bot-registry grant additions', () => {
     expect(parseBotConfigsFromText(JSON.stringify([{ larkAppId: 'rc3', larkAppSecret: 's' }]))[0].restrictGrantCommands).toBeUndefined();
   });
 
-  it('parses regularGroupReplyMode: keeps new-topic|shared, drops chat/invalid/absent to undefined', () => {
+  it('parses regularGroupReplyMode: keeps chat|new-topic|shared, drops invalid/absent to undefined', () => {
     expect(parseBotConfigsFromText(JSON.stringify([{ larkAppId: 'rg1', larkAppSecret: 's', regularGroupReplyMode: 'new-topic' }]))[0].regularGroupReplyMode).toBe('new-topic');
     expect(parseBotConfigsFromText(JSON.stringify([{ larkAppId: 'rg1b', larkAppSecret: 's', regularGroupReplyMode: 'shared' }]))[0].regularGroupReplyMode).toBe('shared');
     expect(parseBotConfigsFromText(JSON.stringify([{ larkAppId: 'rg1c', larkAppSecret: 's', regularGroupReplyMode: 'topic_alias' }]))[0].regularGroupReplyMode).toBe('shared');
     expect(parseBotConfigsFromText(JSON.stringify([{ larkAppId: 'rg1d', larkAppSecret: 's', regularGroupReplyMode: 'topic' }]))[0].regularGroupReplyMode).toBe('shared');
-    // 'chat' is the default → normalized to undefined so bots.json stays clean.
-    for (const bad of ['chat', 'bad', true, 1, undefined]) {
+    expect(parseBotConfigsFromText(JSON.stringify([{ larkAppId: 'rg1e', larkAppSecret: 's', regularGroupReplyMode: 'chat' }]))[0].regularGroupReplyMode).toBe('chat');
+    // Missing means the default new-topic; invalid values normalize to undefined.
+    for (const bad of ['bad', true, 1, undefined]) {
       const c = parseBotConfigsFromText(JSON.stringify([{ larkAppId: 'rg2', larkAppSecret: 's', regularGroupReplyMode: bad }]));
       expect(c[0].regularGroupReplyMode).toBeUndefined();
     }
