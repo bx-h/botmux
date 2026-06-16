@@ -581,6 +581,58 @@ function getPidFile(): string {
  *  can call `botmux send` / `botmux schedule` without a global npm install. */
 const BOTMUX_BIN_DIR = join(homedir(), '.botmux', 'bin');
 
+function writeExecutableIfChanged(path: string, content: string, label: string): void {
+  let existing = '';
+  try { existing = readFileSync(path, 'utf-8'); } catch { /* doesn't exist yet */ }
+  if (existing !== content) {
+    atomicWriteFileSync(path, content, { mode: 0o755 });
+    logger.info(`${label} wrapper script written: ${path}`);
+  }
+}
+
+function larkCliProfileWrapperContent(): string {
+  return `#!/bin/sh
+set -eu
+
+self_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+real_cli=""
+old_ifs=$IFS
+IFS=:
+for dir in $PATH; do
+  [ -n "$dir" ] || dir=.
+  dir_abs=$(CDPATH= cd -- "$dir" 2>/dev/null && pwd -P) || continue
+  [ "$dir_abs" = "$self_dir" ] && continue
+  candidate="$dir_abs/lark-cli"
+  if [ -x "$candidate" ]; then
+    real_cli=$candidate
+    break
+  fi
+done
+IFS=$old_ifs
+
+if [ -z "$real_cli" ]; then
+  echo "botmux lark-cli wrapper: real lark-cli not found in PATH" >&2
+  exit 127
+fi
+
+has_profile_arg=0
+for arg in "$@"; do
+  case "$arg" in
+    --profile|--profile=*) has_profile_arg=1 ;;
+  esac
+done
+
+profile=\${BOTMUX_LARK_APP_ID:-}
+config=\${HOME:-}/.lark-cli/config.json
+if [ "$has_profile_arg" -eq 0 ] && [ -n "$profile" ] && [ -r "$config" ] &&
+   grep -Eq '"(name|appId)"[[:space:]]*:[[:space:]]*"'"$profile"'"' "$config"; then
+  exec "$real_cli" --profile "$profile" "$@"
+fi
+
+exec "$real_cli" "$@"
+`;
+}
+
 function writePidFile(): void {
   const dir = config.session.dataDir;
   if (!existsSync(dir)) {
@@ -600,19 +652,14 @@ function writePidFile(): void {
   try {
     mkdirSync(BOTMUX_BIN_DIR, { recursive: true });
     const cliScript = join(__dirname, 'cli.js');  // dist/cli.js
-    const wrapper = join(BOTMUX_BIN_DIR, 'botmux');
-    const content = `#!/bin/sh\nexec "${process.execPath}" "${cliScript}" "$@"\n`;
-    // Only write if changed (avoid unnecessary disk writes on every restart)
-    let existing = '';
-    try { existing = readFileSync(wrapper, 'utf-8'); } catch { /* doesn't exist yet */ }
-    if (existing !== content) {
-      // 原子写：并发会话随时在 exec 这个 wrapper，半截脚本会让它们的
-      // `botmux send` 全体失败。
-      atomicWriteFileSync(wrapper, content, { mode: 0o755 });
-      logger.info(`Wrapper script written: ${wrapper} → ${cliScript}`);
-    }
+    writeExecutableIfChanged(
+      join(BOTMUX_BIN_DIR, 'botmux'),
+      `#!/bin/sh\nexec "${process.execPath}" "${cliScript}" "$@"\n`,
+      'botmux',
+    );
+    writeExecutableIfChanged(join(BOTMUX_BIN_DIR, 'lark-cli'), larkCliProfileWrapperContent(), 'lark-cli');
   } catch (err: any) {
-    logger.warn(`Failed to write botmux wrapper script: ${err.message}`);
+    logger.warn(`Failed to write botmux bin wrapper script: ${err.message}`);
   }
 
   logger.info(`PID file written: ${getPidFile()} (pid: ${process.pid})`);
