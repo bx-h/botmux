@@ -136,12 +136,13 @@ export function buildRepoPrimeText(input: {
 /**
  * Build the report-back message a dispatched sub-bot sends to its orchestrator.
  *
- * In multi-topic collaboration, `botmux report` keeps the visible report inside
- * the current task topic and @-mentions the orchestrator there. In regular
- * group chat-scope routing, the mention can still wake the orchestrator's
- * existing chat session while the visible conversation stays attached to the
- * task topic. This is the pure content builder; cli.ts resolves the coords and
- * performs the reply.
+ * In 多话题协作模式 a sub-bot must NOT @ the orchestrator in its own sub-topic —
+ * that thread has no orchestrator session, so the orchestrator's daemon would
+ * spawn a fresh, context-less one. Instead `botmux report` sends this content
+ * **into the orchestrator's own thread** (recorded by `botmux dispatch`),
+ * @-mentioning the orchestrator so its existing, context-rich session is the one
+ * that wakes up. This is the pure content builder; cli.ts resolves the coords
+ * and performs the reply.
  *
  * The @ stays on the first line so the mention renders next to the headline;
  * any further lines become their own paragraphs (Lark 'post' shape).
@@ -169,8 +170,8 @@ export function buildReportContent(input: {
  * Footgun guard for the orchestrator→sub-bot direction. A dispatched sub-bot's
  * session lives **inside its sub-topic**, so @-mentioning it from the main chat
  * (e.g. `botmux send --mention <sub-bot>`) doesn't reach that session — it
- * spawns a fresh, context-less one in the chat. To talk to a sub-bot the
- * orchestrator must send INTO its sub-topic
+ * spawns a fresh, context-less one in the chat (the mirror of the report-back
+ * problem). To talk to a sub-bot the orchestrator must send INTO its sub-topic
  * (`botmux dispatch --into <seed> --bot <sub-bot>`).
  *
  * Given the dispatch registry (seed → {orchChatId, bots}) and the set of seeds
@@ -195,16 +196,16 @@ export function findSubBotTopic(input: {
 }
 
 /**
- * Resolve who a `botmux report` should @ and where it should fall back if the
- * current task topic is unavailable.
+ * Resolve where a `botmux report` should go + who to @, so report-back works
+ * even when the orchestrator is on a DIFFERENT machine.
  *
  * Same-machine: the dispatch registry (orchestrate-dispatch.json) is local, so
  * `registryEntry` carries the orchestrator's exact coords (incl. orchRoot for a
  * thread-scope orchestrator). Cross-machine: the foreign sub-bot's daemon never
  * wrote that registry, so `registryEntry` is undefined — but everything needed
- * for a usable fallback is on the sub-bot's OWN session: the fallback chat is
- * the chat the sub-topic lives in (= the orchestrator's chat), and the
- * orchestrator is creatorOpenId captured from the dispatch @. So we fall back to
+ * for the common case is on the sub-bot's OWN session: the report goes top-level
+ * into the chat the sub-topic lives in (= the orchestrator's chat) and @-s the
+ * orchestrator (creatorOpenId, captured from the dispatch @). So we fall back to
  * `{ orchChatId: sessionChatId, orchScope: 'chat', orchRoot: '' }`.
  *
  * orchOpenId prefers `creatorOpenId` (stable, set on every session-creation path
@@ -225,37 +226,6 @@ export function resolveReportTarget(input: {
     orchRoot: e?.orchRoot ?? '',
     orchOpenId: input.creatorOpenId ?? input.ownerOpenId ?? input.quoteTargetSenderOpenId,
   };
-}
-
-/**
- * Prefer the task topic that the reporting sub-bot is currently working in.
- * Chat-scope sessions record such topics as reply aliases; reuse them only for
- * the matching turn, same as normal session replies. Thread-scope sessions are
- * already anchored on the topic root. Returning null intentionally preserves the
- * older orchestrator-target fallback for sessions without a usable topic.
- */
-export function resolveReportTopicTarget(input: {
-  sessionScope?: string;
-  sessionRootMessageId?: string;
-  currentReplyTargetRootId?: string;
-  currentReplyTargetTurnId?: string;
-  replyTurnTargetRootId?: string;
-  currentTurnId?: string;
-}): { mode: 'thread'; rootMessageId: string } | null {
-  if (input.sessionScope === 'chat') {
-    const current = input.currentReplyTargetRootId?.trim();
-    if (current && input.currentReplyTargetTurnId && input.currentReplyTargetTurnId === input.currentTurnId) {
-      return { mode: 'thread', rootMessageId: current };
-    }
-    const recorded = input.currentTurnId ? input.replyTurnTargetRootId?.trim() : undefined;
-    if (recorded) return { mode: 'thread', rootMessageId: recorded };
-    return null;
-  }
-
-  const root = input.sessionRootMessageId?.trim();
-  if (input.sessionScope === 'thread' && root) return { mode: 'thread', rootMessageId: root };
-
-  return null;
 }
 
 /**

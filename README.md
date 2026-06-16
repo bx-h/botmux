@@ -110,8 +110,6 @@ botmux dispatch --title "实现登录模块" \
 - `--standby` —— **必须配 `--repo`**（且不能与 `--into` 同用）：只发一次 `/repo` 把 bot 拉起到指定目录待命、不派简报，之后用 `--into ... --brief(-file)` 激活派活。
 - `--into <话题root>` —— 回到已有话题追加一条（激活待命的 bot / 追加协调）；仍需 `--bot`，且非 standby 时必须带 `--brief` 或 `--brief-file`。
 
-子 bot 完成后在自己的任务话题里运行 `botmux report "子项目完成 + 产出位置"`。正常情况下，报告会回复到当前任务话题并 @ 编排者；普通群 chat-scope 下可见讨论仍留在任务话题，事件会折回编排者的群级会话继续聚合。只有当前会话没有可用任务话题时才退回派活记录里的主编排目标。
-
 **协作边界**：
 
 - **同部署的「自家」bot 之间互信** —— 编排者能直接对它们跑 `/repo` 等 operate 级命令（与自家 bot 的对话权限一致）。外部 bot 的授权分两层：`/grant @bot` 只给「对话 / 被 chat-scope 拉起」的权限（talk-only，不碰 `allowedUsers`、跑不了 operate 级命令）；要让外部 bot 跑 `/repo` 等 operate 级命令，需把它列进 `allowedUsers`（或后续 operate 级授权）。`/introduce` 只负责发现 / 登记 open_id，**不授予任何权限**。

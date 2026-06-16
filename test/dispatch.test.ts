@@ -22,7 +22,6 @@ import {
   findSubBotTopic,
   eligibleAutoMentionAliases,
   offTopicSubBotTopic,
-  resolveReportTopicTarget,
   resolveReportTarget,
   resolveSendTarget,
 } from '../src/core/dispatch.js';
@@ -260,53 +259,6 @@ describe('resolveReportTarget', () => {
   });
 });
 
-describe('resolveReportTopicTarget', () => {
-  it('keeps chat-scope reports in the current task topic alias', () => {
-    expect(resolveReportTopicTarget({
-      sessionScope: 'chat',
-      sessionRootMessageId: 'oc_chat',
-      currentReplyTargetRootId: 'om_task_topic',
-      currentReplyTargetTurnId: 'turn-a',
-      currentTurnId: 'turn-a',
-    })).toEqual({ mode: 'thread', rootMessageId: 'om_task_topic' });
-  });
-
-  it('does not use a stale chat-scope topic alias from another turn', () => {
-    expect(resolveReportTopicTarget({
-      sessionScope: 'chat',
-      sessionRootMessageId: 'oc_chat',
-      currentReplyTargetRootId: 'om_task_topic',
-      currentReplyTargetTurnId: 'turn-a',
-      currentTurnId: 'turn-b',
-    })).toBeNull();
-  });
-
-  it('uses the recorded per-turn topic when the current alias has moved on', () => {
-    expect(resolveReportTopicTarget({
-      sessionScope: 'chat',
-      sessionRootMessageId: 'oc_chat',
-      currentReplyTargetRootId: 'om_task_topic_new',
-      currentReplyTargetTurnId: 'turn-new',
-      replyTurnTargetRootId: 'om_task_topic_old',
-      currentTurnId: 'turn-old',
-    })).toEqual({ mode: 'thread', rootMessageId: 'om_task_topic_old' });
-  });
-
-  it('uses a thread-scope session root as the task topic', () => {
-    expect(resolveReportTopicTarget({
-      sessionScope: 'thread',
-      sessionRootMessageId: 'om_thread_root',
-    })).toEqual({ mode: 'thread', rootMessageId: 'om_thread_root' });
-  });
-
-  it('returns null for flat chat-scope sessions without a topic alias', () => {
-    expect(resolveReportTopicTarget({
-      sessionScope: 'chat',
-      sessionRootMessageId: 'oc_chat',
-    })).toBeNull();
-  });
-});
-
 describe('resolveSendTarget — destination routing', () => {
   const base = { topLevel: false, chatScope: false, chatId: 'oc_chat', rootMessageId: 'om_root' };
   it('defaults to replying in the session thread (thread scope, no flags)', () => {
@@ -326,11 +278,8 @@ describe('resolveSendTarget — destination routing', () => {
     expect(resolveSendTarget({ ...base, chatScope: true, replyTargetRootId: 'om_alias', replyTargetTurnId: 'turn-a', currentTurnId: 'turn-a' })).toEqual({ mode: 'thread', rootMessageId: 'om_alias' });
     expect(resolveSendTarget({ ...base, chatScope: true, replyTargetRootId: 'om_alias', replyTargetTurnId: 'turn-a', currentTurnId: 'turn-b' })).toEqual({ mode: 'plain', chatId: 'oc_chat' });
   });
-  it('chat-scope send uses the recorded per-turn topic when the current alias has moved on', () => {
-    expect(resolveSendTarget({ ...base, chatScope: true, replyTargetRootId: 'om_alias_new', replyTargetTurnId: 'turn-new', replyTurnTargetRootId: 'om_alias_old', currentTurnId: 'turn-old' })).toEqual({ mode: 'thread', rootMessageId: 'om_alias_old' });
-  });
   it('--top-level overrides a chat-scope topic alias target', () => {
-    expect(resolveSendTarget({ ...base, chatScope: true, topLevel: true, replyTargetRootId: 'om_alias', replyTargetTurnId: 'turn-a', replyTurnTargetRootId: 'om_alias_old', currentTurnId: 'turn-a' })).toEqual({ mode: 'plain', chatId: 'oc_chat' });
+    expect(resolveSendTarget({ ...base, chatScope: true, topLevel: true, replyTargetRootId: 'om_alias', replyTargetTurnId: 'turn-a', currentTurnId: 'turn-a' })).toEqual({ mode: 'plain', chatId: 'oc_chat' });
   });
 });
 

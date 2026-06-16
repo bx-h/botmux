@@ -219,7 +219,7 @@ botmux dispatch --title "Implement login module" \
 - `--standby` — **must be paired with `--repo`** (and cannot be combined with `--into`): sends `/repo` once to bring the bot up in the given directory on standby without a brief; activate it later with `--into ... --brief(-file)`.
 - `--into <topic root>` — return to an existing topic and append one message (activate standby bots / add coordination); still requires `--bot`, and outside standby mode must carry `--brief` or `--brief-file`.
 
-When a sub-bot finishes, it runs `botmux report "sub-project done + output location"` from inside its own task topic. Normally the report is posted back into that same topic and @-mentions the orchestrator; in regular group chat-scope routing, the visible discussion stays in the task topic while the event folds back into the orchestrator's group session. Only sessions without a usable task topic fall back to the recorded orchestrator target.
+When a sub-bot finishes, it reports progress/completion back with `botmux report` from inside its own sub-topic. This routes the report into the orchestrator's **own** session (which still holds full context) instead of @-mentioning the orchestrator inside the sub-topic — where it has no session and the @ would spawn a fresh, context-less one. The orchestrator then aggregates the collected reports.
 
 **Collaboration boundaries:**
 

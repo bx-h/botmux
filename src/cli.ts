@@ -29,7 +29,7 @@ import { createRequire } from 'node:module';
 import { createHmac, randomBytes } from 'node:crypto';
 import { validateWorkingDir } from './core/working-dir.js';
 import { findAncestorSessionContext as findAncestorSessionContextFromMarkers } from './core/session-marker.js';
-import { parseDispatchBotSpec, buildDispatchMessages, buildRepoPrimeText, buildReportContent, eligibleAutoMentionAliases, offTopicSubBotTopic, resolveReportTarget, resolveReportTopicTarget, resolveSendTarget } from './core/dispatch.js';
+import { parseDispatchBotSpec, buildDispatchMessages, buildRepoPrimeText, buildReportContent, eligibleAutoMentionAliases, offTopicSubBotTopic, resolveReportTarget, resolveSendTarget } from './core/dispatch.js';
 import { enableAutostart, disableAutostart, autostartStatus, refreshAutostart } from './autostart.js';
 import { tmuxEnv } from './setup/ensure-tmux.js';
 import { writeBotsJsonAtomic as writeBotsAtomic } from './setup/bots-store.js';
@@ -1541,7 +1541,6 @@ interface SessionData {
   lastCallerOpenId?: string;
   /** Chat-scope quote chain — see Session.quoteTargetId in types.ts. */
   quoteTargetId?: string;
-  replyTurnTargets?: { [turnId: string]: { rootMessageId: string; updatedAt: string } };
   currentReplyTarget?: { rootMessageId: string; turnId: string; updatedAt: string };
   quoteTargetSenderOpenId?: string;
   quoteTargetSenderIsBot?: boolean;
@@ -3308,7 +3307,6 @@ async function cmdSend(rest: string[]): Promise<void> {
   const s = sessions.get(sid);
   if (!s) { console.error(`未找到 session ${sid}`); process.exit(1); }
   if (!s.larkAppId) { console.error(`session ${sid} 缺少 larkAppId`); process.exit(1); }
-  const replyTurnTargetRootId = currentTurnId ? s.replyTurnTargets?.[currentTurnId]?.rootMessageId : undefined;
 
   // Read content from: --content-file > positional arg > stdin
   let content = '';
@@ -3356,7 +3354,7 @@ async function cmdSend(rest: string[]): Promise<void> {
     const { rmSync } = await import('node:fs');
     const appId = s.larkAppId!;
     const targetChatId = overrideChatId ?? s.chatId;
-    const target = resolveSendTarget({ into: sendInto, topLevel: sendTopLevel, chatScope: s.scope === 'chat', chatId: targetChatId, rootMessageId: s.rootMessageId, replyTargetRootId: s.currentReplyTarget?.rootMessageId, replyTargetTurnId: s.currentReplyTarget?.turnId, replyTurnTargetRootId, currentTurnId });
+    const target = resolveSendTarget({ into: sendInto, topLevel: sendTopLevel, chatScope: s.scope === 'chat', chatId: targetChatId, rootMessageId: s.rootMessageId, replyTargetRootId: s.currentReplyTarget?.rootMessageId, replyTargetTurnId: s.currentReplyTarget?.turnId, currentTurnId });
     const sendAudio = (fileKey: string): Promise<string> =>
       target.mode === 'plain'
         ? sendMessage(appId, target.chatId, JSON.stringify({ file_key: fileKey }), 'audio')
@@ -3496,7 +3494,7 @@ async function cmdSend(rest: string[]): Promise<void> {
   };
   // Dispatch helper: top-level / chat-scope send vs reply-in-thread, single
   // decision point. Used for file attachments (always plain in chat scope).
-  const sendTarget = resolveSendTarget({ into: sendInto, topLevel: sendTopLevel, chatScope: isChatScope, chatId: targetChatId, rootMessageId: s.rootMessageId, replyTargetRootId: s.currentReplyTarget?.rootMessageId, replyTargetTurnId: s.currentReplyTarget?.turnId, replyTurnTargetRootId, currentTurnId });
+  const sendTarget = resolveSendTarget({ into: sendInto, topLevel: sendTopLevel, chatScope: isChatScope, chatId: targetChatId, rootMessageId: s.rootMessageId, replyTargetRootId: s.currentReplyTarget?.rootMessageId, replyTargetTurnId: s.currentReplyTarget?.turnId, currentTurnId });
   const dispatch = (content: string, msgType: string): Promise<string> =>
     sendTarget.mode === 'plain'
       ? sendMessage(appId, sendTarget.chatId, content, msgType, undefined, hookContext)
@@ -3974,14 +3972,15 @@ async function cmdDispatch(rest: string[]): Promise<void> {
     brief = readFileSync(briefFile, 'utf-8');
   }
 
-  // Append the report-back protocol so the dispatched sub-bot reports via the
-  // standardized command and keeps the visible result inside this task topic.
-  // Skipped for --standby (no brief).
+  // Append the report-back protocol so the dispatched sub-bot reports via
+  // `botmux report` (which routes to the orchestrator's OWN session) rather than
+  // @-ing the orchestrator in its sub-topic — which has no orchestrator session
+  // and would spawn a fresh, context-less one. Skipped for --standby (no brief).
   if (brief.trim()) {
     brief = brief.trimEnd() +
       '\n\n— 完成回报 —\n' +
-      '干完后在本话题运行 `botmux report "子项目完成 + 产出位置/摘要"`；' +
-      '它会把回报贴回本任务话题并通知主编排 bot，避免把同一任务拆散到群聊顶层。';
+      '干完后在本话题运行 `botmux report "子项目完成 + 产出位置/摘要"` 把结果回报给主编排会话；' +
+      '不要在本话题 @ 主bot（那会另起一个没有上下文的新会话）。';
   }
 
   // ── Flag validation ──
@@ -4058,10 +4057,10 @@ async function cmdDispatch(rest: string[]): Promise<void> {
 
     // Record the orchestrator's coords for this sub-topic, keyed by the seed
     // (which becomes every dispatched sub-bot's session.rootMessageId). The
-    // sub-bot's `botmux report` looks this up to know whom to @ and where to
-    // fall back if the current task topic is unavailable. Lives in the shared
-    // data dir so every bot's daemon (one-per-bot) can read it. Best-effort —
-    // report-back degrades to a clear error if absent.
+    // sub-bot's `botmux report` looks this up to route its report back into the
+    // orchestrator's OWN session. Lives in the shared data dir so every bot's
+    // daemon (one-per-bot) can read it. Best-effort — report-back degrades to a
+    // clear error if absent.
     try {
       const regPath = join(resolveDataDir(), 'orchestrate-dispatch.json');
       let reg: Record<string, unknown> = {};
@@ -4115,26 +4114,30 @@ async function cmdDispatch(rest: string[]): Promise<void> {
 
 /**
  * `botmux report` — a dispatched sub-bot reports progress/completion back to the
- * task topic and notifies the orchestrator that dispatched it.
+ * orchestrator that dispatched it.
  *
- * In multi-topic collaboration, the visible conversation for a sub-project must
- * stay inside that sub-topic. For chat-scope sessions this uses the current
- * reply alias; for thread-scope sessions it uses the session root. Only sessions
- * without a usable task topic fall back to the orchestrator target recorded by
- * dispatch.
+ * In 多话题协作模式 the sub-bot lives in its own sub-topic, where the orchestrator
+ * has no session; @-ing the orchestrator there would spawn a fresh, context-less
+ * one (申晗's #1 bug). Instead this routes the report INTO the orchestrator's own
+ * thread (recorded by `botmux dispatch` in orchestrate-dispatch.json) and @-s the
+ * orchestrator there, so its existing, context-rich session is the one that wakes.
+ *
+ * Coords: orchestrator open_id = the sub-bot session's quoteTargetSenderOpenId
+ * (the dispatcher of the turn that opened this sub-topic); orchestrator thread =
+ * the registry entry keyed by this sub-bot's session.rootMessageId (== the seed).
  */
 async function cmdReport(rest: string[]): Promise<void> {
   if (rest.includes('--help') || rest.includes('-h')) {
-    console.log(`botmux report — 把子项目进展/完成回报到当前任务话题
+    console.log(`botmux report — 把子项目进展/完成回报给派活的主编排会话
 
 用法:
   botmux report "子项目X 完成，产出在 …"
   botmux report --content-file <path>
 
 说明:
-  「多话题协作模式」里你（子 bot）干完后在本命令里写回报即可。
-  正常情况下，本命令会把回报回复到当前子项目话题并 @ 主编排 bot，让同一任务的讨论留在同一话题。
-  仅当当前会话没有可用任务话题时，才回退到派活时记录的主编排目标。仅在被 botmux dispatch 派活的子项目会话里可用。
+  「多话题协作模式」里你（子 bot）干完后不要在本话题 @ 主bot——本话题没有主bot的会话，
+  @ 会另起一个无上下文的新会话。本命令把回报发回主编排会话所在的话题、并 @ 主编排 bot，
+  使其带完整上下文继续聚合。仅在被 botmux dispatch 派活的子项目会话里可用。
 
 选项:
   --content-file <path>  从文件读取回报内容
@@ -4160,9 +4163,7 @@ async function cmdReport(rest: string[]): Promise<void> {
     process.exit(1);
   }
 
-  const ancestorCtx = findAncestorSessionContext();
-  const sid = sessionIdArg ?? normalizeSessionIdValue(ancestorCtx?.sessionId);
-  const currentTurnId = ancestorCtx?.turnId ?? process.env.BOTMUX_TURN_ID;
+  const sid = sessionIdArg ?? findAncestorSessionId();
   if (!sid) {
     console.error('无法推断 session-id。请在被 dispatch 派活的会话里运行，或传 --session-id <id>。');
     process.exit(1);
@@ -4171,12 +4172,13 @@ async function cmdReport(rest: string[]): Promise<void> {
   const s = sessions.get(sid);
   if (!s) { console.error(`未找到 session ${sid}`); process.exit(1); }
   if (!s.larkAppId) { console.error(`session ${sid} 缺少 larkAppId`); process.exit(1); }
-  const replyTurnTargetRootId = currentTurnId ? s.replyTurnTargets?.[currentTurnId]?.rootMessageId : undefined;
 
-  // Resolve who to @ and where to fall back if the current task topic is missing.
-  // Same-machine: the dispatch registry carries the orchestrator's exact coords.
-  // Cross-machine or missing registry: resolveReportTarget falls back to this
-  // sub-bot session's chat + creatorOpenId.
+  // Resolve where the report goes + who to @. Same-machine: the dispatch registry
+  // (keyed by this sub-bot's thread root) carries the orchestrator's exact coords.
+  // CROSS-MACHINE: the orchestrator is on another machine, so its registry isn't
+  // on THIS one — resolveReportTarget falls back to this sub-bot's own session
+  // (report top-level into its chat, @ the dispatcher via creatorOpenId). See
+  // resolveReportTarget / Session.creatorOpenId.
   const regPath = join(resolveDataDir(), 'orchestrate-dispatch.json');
   let reg: Record<string, any> = {};
   try { if (existsSync(regPath)) reg = JSON.parse(readFileSync(regPath, 'utf-8')); } catch { /* */ }
@@ -4202,40 +4204,21 @@ async function cmdReport(rest: string[]): Promise<void> {
 
   const paras = buildReportContent({ orchOpenId: tgt.orchOpenId, content });
   const postJson = JSON.stringify({ zh_cn: { title: '', content: paras } });
-  const topicTarget = resolveReportTopicTarget({
-    sessionScope: s.scope,
-    sessionRootMessageId: s.rootMessageId,
-    currentReplyTargetRootId: s.currentReplyTarget?.rootMessageId,
-    currentReplyTargetTurnId: s.currentReplyTarget?.turnId,
-    replyTurnTargetRootId,
-    currentTurnId,
-  });
 
   try {
     let msgId: string;
-    let reportMode: 'task-topic' | 'orchestrator-chat-fallback' | 'orchestrator-thread-fallback';
-    if (topicTarget) {
-      // Keep the visible report attached to the sub-project topic. In regular
-      // group chat-scope routing, the @ mention still wakes the orchestrator's
-      // chat session while its reply remains in this same topic.
-      msgId = await replyMessage(appId, topicTarget.rootMessageId, postJson, 'post', true);
-      reportMode = 'task-topic';
-    } else if (tgt.orchScope === 'chat' || !tgt.orchRoot) {
-      // No task topic target is known: fall back to the historical chat target.
+    if (tgt.orchScope === 'chat' || !tgt.orchRoot) {
+      // Orchestrator at chat scope, or cross-machine fallback → post top-level
+      // into the chat (the sub-topic's chat = the orchestrator's chat).
       msgId = await sendMessage(appId, tgt.orchChatId, postJson, 'post');
-      reportMode = 'orchestrator-chat-fallback';
     } else {
-      // No task topic target is known: fall back to the recorded orchestrator
-      // thread so old/edge sessions can still report.
+      // Same-machine thread-scope orchestrator → reply into its thread so its
+      // existing context-rich session (anchored on orchRoot) receives the report.
       msgId = await replyMessage(appId, tgt.orchRoot, postJson, 'post', true);
-      reportMode = 'orchestrator-thread-fallback';
     }
     console.log(JSON.stringify({
       success: true,
-      reportedTo: topicTarget?.rootMessageId || tgt.orchRoot || tgt.orchChatId,
-      reportMode,
-      taskTopicRoot: topicTarget?.rootMessageId ?? null,
-      fallbackTarget: tgt.orchRoot || tgt.orchChatId,
+      reportedTo: tgt.orchRoot || tgt.orchChatId,
       orchestrator: tgt.orchOpenId,
       viaRegistry: !!entry,
       messageId: msgId,

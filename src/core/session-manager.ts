@@ -622,7 +622,6 @@ export function persistStreamCardState(ds: DaemonSession): void {
     s.lastUserPrompt === ds.lastUserPrompt &&
     s.lastCliInput === ds.lastCliInput &&
     JSON.stringify(s.replyThreadAliases ?? {}) === JSON.stringify(ds.replyThreadAliases ?? {}) &&
-    JSON.stringify(s.replyTurnTargets ?? {}) === JSON.stringify(ds.replyTurnTargets ?? {}) &&
     JSON.stringify(s.currentReplyTarget ?? null) === JSON.stringify(ds.currentReplyTarget ?? null) &&
     s.pendingResponseCardId === ds.pendingResponseCardId &&
     s.pendingResponseCardState === ds.pendingResponseCardState &&
@@ -637,7 +636,6 @@ export function persistStreamCardState(ds: DaemonSession): void {
   s.lastUserPrompt = ds.lastUserPrompt;
   s.lastCliInput = ds.lastCliInput;
   s.replyThreadAliases = ds.replyThreadAliases;
-  s.replyTurnTargets = ds.replyTurnTargets;
   s.currentReplyTarget = ds.currentReplyTarget;
   s.pendingResponseCardId = ds.pendingResponseCardId;
   s.pendingResponseCardState = ds.pendingResponseCardState;
@@ -656,7 +654,6 @@ export function rememberLastCliInput(ds: DaemonSession, userPrompt: string, cliI
   ds.session.lastUserPrompt = userPrompt;
   ds.session.lastCliInput = cliInput;
   ds.session.replyThreadAliases = ds.replyThreadAliases;
-  ds.session.replyTurnTargets = ds.replyTurnTargets;
   ds.session.currentReplyTarget = ds.currentReplyTarget;
   sessionStore.updateSession(ds.session);
 }
@@ -772,7 +769,6 @@ export async function restoreActiveSessions(activeSessions: Map<string, DaemonSe
         lastUserPrompt: session.lastUserPrompt,
         lastCliInput: session.lastCliInput,
         replyThreadAliases: session.replyThreadAliases,
-        replyTurnTargets: session.replyTurnTargets,
         currentReplyTarget: session.currentReplyTarget,
         pendingResponseCardId: session.pendingResponseCardId,
         pendingResponseCardState: session.pendingResponseCardState,
@@ -831,7 +827,6 @@ export async function restoreActiveSessions(activeSessions: Map<string, DaemonSe
       lastUserPrompt: session.lastUserPrompt,
       lastCliInput: session.lastCliInput,
       replyThreadAliases: session.replyThreadAliases,
-      replyTurnTargets: session.replyTurnTargets,
       currentReplyTarget: session.currentReplyTarget,
       pendingResponseCardId: session.pendingResponseCardId,
       pendingResponseCardState: session.pendingResponseCardState,
@@ -1090,7 +1085,6 @@ export async function resumeSession(
     lastUserPrompt: session.lastUserPrompt,
     lastCliInput: session.lastCliInput,
     replyThreadAliases: session.replyThreadAliases,
-    replyTurnTargets: session.replyTurnTargets,
     currentReplyTarget: session.currentReplyTarget,
     pendingResponseCardId: session.pendingResponseCardId,
     pendingResponseCardState: session.pendingResponseCardState,
