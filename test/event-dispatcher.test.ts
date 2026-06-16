@@ -450,6 +450,7 @@ describe('im.message.receive_v1 — bot-to-bot @mention routing', () => {
     // Same setup as above, but the foreign bot IS in our peer cross-ref → the
     // dispatcher should route it through to handleThreadReply (which auto-
     // creates a chat-scope session and inherits the peer's workingDir).
+    setupBotState({ regularGroupReplyMode: 'chat' });
     mockGetChatMode.mockResolvedValueOnce('group');
     mockReadFileSync.mockReturnValue(JSON.stringify({ 'BotB': OTHER_BOT_OPEN_ID }));
     const event = makeBotMessageEvent({
@@ -477,6 +478,7 @@ describe('im.message.receive_v1 — bot-to-bot @mention routing', () => {
     // 写的 'app'。dispatcher 必须把两个值等价对待，否则会绕开 foreign-bot
     // 分支，落到下面的 user-message 通用分支去（绕过 chat-scope gate /
     // /close self-message 特判 / "Bot-to-bot @mention detected" 日志）。
+    setupBotState({ regularGroupReplyMode: 'chat' });
     mockGetChatMode.mockResolvedValueOnce('group');
     mockReadFileSync.mockReturnValue(JSON.stringify({ 'BotB': OTHER_BOT_OPEN_ID }));
     const event = makeBotMessageEvent({
@@ -533,7 +535,7 @@ describe('im.message.receive_v1 — bot-to-bot @mention routing', () => {
     // 它必须排在 vetting gate 之后。否则随机第三方 bot 发 `@bot /t …` 会让闸门
     // 的 `ctx.scope === 'chat' || source === 'regular-group-thread'` 两条件全 false
     // → 绕过 vetting → 静默 spawn 一个 thread-scope 会话。这条用例锁死「不能绕」。
-    mockGetChatMode.mockResolvedValueOnce('group');  // 普通群, regularGroupReplyMode unset(chat) → source=regular-group-chat
+    mockGetChatMode.mockResolvedValueOnce('group');  // 普通群；unknown peer is dropped before new-topic routing can spawn.
     mockReadFileSync.mockReturnValue('{}');  // empty cross-ref → unknown peer
     const event = makeBotMessageEvent({
       senderOpenId: OTHER_BOT_OPEN_ID,
@@ -732,7 +734,7 @@ describe('im.message.receive_v1 — bot-to-bot @mention routing', () => {
     // owner 用 `/grant @bot` 把外部 bot 加进本群 chatGrants：即便它不在 peer
     // cross-ref（isKnownPeerBot=false），命中 chatGrants 也应与已注册 peer 同等
     // 放行，拉起 chat-scope session。与上面「unknown peer 被 drop」用例对照。
-    setupBotState({ chatGrants: { 'chat-001': [OTHER_BOT_OPEN_ID] } });
+    setupBotState({ regularGroupReplyMode: 'chat', chatGrants: { 'chat-001': [OTHER_BOT_OPEN_ID] } });
     mockGetChatMode.mockResolvedValueOnce('group');
     mockReadFileSync.mockReturnValue('{}');  // empty cross-ref → unknown peer
     const event = makeBotMessageEvent({
@@ -781,7 +783,7 @@ describe('im.message.receive_v1 — bot-to-bot @mention routing', () => {
   it('routes unknown-peer cross-bot @mention in ANY chat when the bot is globally granted', async () => {
     // 全局对话授权（globalGrants）：被授权 bot 不在 peer cross-ref、也没在本群 chatGrants，
     // 但命中 globalGrants → 在任意群（这里用一个全新的 chat-777）都应放行拉起 chat-scope session。
-    setupBotState({ globalGrants: [OTHER_BOT_OPEN_ID] });
+    setupBotState({ regularGroupReplyMode: 'chat', globalGrants: [OTHER_BOT_OPEN_ID] });
     mockGetChatMode.mockResolvedValueOnce('group');
     mockReadFileSync.mockReturnValue('{}');  // empty cross-ref → unknown peer
     const event = makeBotMessageEvent({
@@ -812,6 +814,7 @@ describe('im.message.receive_v1 — bot-to-bot @mention routing', () => {
     // oncall 用例：同样的 unknown peer 会被 drop。
     // 注意 /introduce 写的是 observed-bots-store（发现/能 @ 到对方），跟这道接收侧
     // cross-ref vetting 是两套独立存储，不是这里放行的前提。
+    setupBotState({ regularGroupReplyMode: 'chat' });
     mockGetChatMode.mockResolvedValueOnce('group');
     mockIsChatOncallBoundForAnyBot.mockReturnValue(true);
     mockFindOncallChat.mockReturnValue({ chatId: 'chat-001', workingDir: '/repo' });
@@ -889,7 +892,7 @@ describe('im.message.receive_v1 — bot-to-bot @mention routing', () => {
     mockIsChatOncallBoundForAnyBot.mockReturnValue(true);
     mockFindOncallChat.mockReturnValue(undefined);
     mockGetBot.mockReturnValue({
-      config: { larkAppId: MY_APP_ID, larkAppSecret: 'secret', cliId: 'claude-code' },
+      config: { larkAppId: MY_APP_ID, larkAppSecret: 'secret', cliId: 'claude-code', regularGroupReplyMode: 'chat' },
       botOpenId: MY_OPEN_ID,
       resolvedAllowedUsers: ['ou_allowed_sibling'],
     });
@@ -955,7 +958,7 @@ describe('im.message.receive_v1 — bot-to-bot @mention routing', () => {
     mockIsChatOncallBoundForAnyBot.mockReturnValue(false);
     mockReadFileSync.mockReturnValue(JSON.stringify({ 'BotB': OTHER_BOT_OPEN_ID }));
     mockGetBot.mockReturnValue({
-      config: { larkAppId: MY_APP_ID, larkAppSecret: 'secret', cliId: 'claude-code' },
+      config: { larkAppId: MY_APP_ID, larkAppSecret: 'secret', cliId: 'claude-code', regularGroupReplyMode: 'chat' },
       botOpenId: MY_OPEN_ID,
       resolvedAllowedUsers: ['ou_allowed_human_only'],
     });
@@ -1081,6 +1084,7 @@ describe('im.message.receive_v1 — bot-to-bot @mention routing', () => {
   });
 
   it('treats 普通群 root_id WITHOUT thread_id as chat-scope (Lark quote-bubble quirk)', async () => {
+    setupBotState({ regularGroupReplyMode: 'chat' });
     // User typed a top-level message in 普通群; Lark UI attached root_id but
     // NOT thread_id (引用气泡 / 快速回复 bubble). decideRouting now keys on
     // thread_id, so this routes straight to chat-scope (no fallback needed).
@@ -1115,6 +1119,7 @@ describe('im.message.receive_v1 — bot-to-bot @mention routing', () => {
     // In chat/shared modes, a mentioned reply inside a regular-group topic should
     // reuse the group chat-scope context and reply in that same topic, rather
     // than spawning a new thread-scope session per topic.
+    setupBotState({ regularGroupReplyMode: 'chat' });
     const event = makeUserMessageEvent({
       senderOpenId: USER_OPEN_ID,
       content: JSON.stringify({ text: '@BotA new topic please' }),
@@ -1297,8 +1302,8 @@ describe('im.message.receive_v1 — bot-to-bot @mention routing', () => {
     expect(handlers.handleNewTopic).not.toHaveBeenCalled();
   });
 
-  it('default chat-mode @ inside a regular-group topic reuses the group chat session', async () => {
-    setupBotState({ allowedUsers: [USER_OPEN_ID] });
+  it('explicit chat-mode @ inside a regular-group topic reuses the group chat session', async () => {
+    setupBotState({ regularGroupReplyMode: 'chat', allowedUsers: [USER_OPEN_ID] });
     mockGetChatMode.mockResolvedValue('group');
     handlers.isSessionOwner.mockImplementation((anchor: string) => anchor === 'chat-default');
     const event = makeUserMessageEvent({
@@ -1415,11 +1420,12 @@ describe('im.message.receive_v1 — bot-to-bot @mention routing', () => {
     await capturedHandlers['im.message.receive_v1'](event);
     await flushEventWork();
 
-    // never tier relaxes the "@ required" gate for talk-allowed senders → the
-    // non-@ top-level message routes to handleNewTopic (chat-scope, no session yet).
+    // never tier relaxes the "@ required" gate for talk-allowed senders. With
+    // the default new-topic mode, a non-@ top-level message still gets its own
+    // isolated thread session.
     expect(handlers.handleNewTopic).toHaveBeenCalledWith(event, expect.objectContaining({
-      scope: 'chat',
-      anchor: 'chat-never',
+      scope: 'thread',
+      anchor: 'msg-never-toplevel',
       larkAppId: MY_APP_ID,
     }));
     expect(handlers.handleThreadReply).not.toHaveBeenCalled();
@@ -1750,7 +1756,7 @@ describe('im.message.receive_v1 — stale chat-scope detection (group → topic 
     capturedHandlers = {};
     __resetAnchorQueues();
     __resetEventClaimsForTest();
-    setupBotState();
+    setupBotState({ regularGroupReplyMode: 'chat' });
     handlers = makeHandlers();
     mockIsChatOncallBoundForAnyBot.mockReturnValue(false);
     mockListChatBotMembers.mockResolvedValue([{ openId: MY_OPEN_ID, name: 'BotA' }]);
@@ -1864,6 +1870,7 @@ describe('im.message.receive_v1 — stale topic detection (topic → group conve
   });
 
   it('reroutes to chat-scope when cached topic is stale (chat now group-mode)', async () => {
+    setupBotState({ regularGroupReplyMode: 'chat' });
     // Cache says 'topic' (legacy), forceRefresh reveals 'group' (current truth).
     mockGetChatMode.mockImplementation(async (_appId: string, _chatId: string, options?: { forceRefresh?: boolean }) => {
       return options?.forceRefresh ? 'group' : 'topic';
@@ -2103,6 +2110,7 @@ describe('im.message.receive_v1 — /t force-topic override', () => {
   });
 
   it('does NOT flip when message has no /t prefix', async () => {
+    setupBotState({ regularGroupReplyMode: 'chat' });
     const event = makeUserMessageEvent({
       senderOpenId: USER_OPEN_ID,
       content: JSON.stringify({ text: '@BotA hello' }),
@@ -2836,6 +2844,7 @@ describe('im.message.receive_v1 — ack-safe duplicate delivery', () => {
   });
 
   it('processes two id-less events instead of dropping one (fallback key never collides)', async () => {
+    setupBotState({ regularGroupReplyMode: 'chat' });
     const makeIdless = (text: string) => {
       const e = makeUserMessageEvent({
         senderOpenId: USER_OPEN_ID,

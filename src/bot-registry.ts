@@ -244,8 +244,8 @@ export interface BotConfig {
    * Per-bot DEFAULT session mode for regular Lark groups (overridable per-chat
    * via `/reply-mode` → `chatReplyModes`). Resolved by
    * `chat-reply-mode-store.regularGroupDefaultMode`.
-   *   • 'chat' (or undefined) — whole group shares one flat chat-scope session
-   *   • 'new-topic'           — each top-level @mention forks its own thread-scope session
+   *   • 'new-topic' (or undefined) — each top-level @mention forks its own thread-scope session
+   *   • 'chat'                     — whole group shares one flat chat-scope session
    *   • 'shared'              — replies fold into a topic but reuse the one chat-scope session
    */
   regularGroupReplyMode?: ChatReplyMode;
@@ -738,13 +738,9 @@ export function parseBotConfigsFromText(jsonText: string): BotConfig[] {
         ? entry.autoStartOnGroupJoinPrompt
         : undefined,
       autoStartOnNewTopic: entry.autoStartOnNewTopic === true || undefined,
-      // Per-bot regular-group default mode. Only 'new-topic' | 'shared' are
-      // meaningful; 'chat' (the flat default) and anything else normalize to
-      // undefined so bots.json stays clean.
-      regularGroupReplyMode: (() => {
-        const mode = normalizeChatReplyModeConfig(entry.regularGroupReplyMode);
-        return mode === 'new-topic' || mode === 'shared' ? mode : undefined;
-      })(),
+      // Per-bot regular-group default mode. Missing means the global default
+      // (new-topic); chat/shared are explicit opt-outs.
+      regularGroupReplyMode: normalizeChatReplyModeConfig(entry.regularGroupReplyMode),
       // 3-tier @ policy. Only 'topic' | 'never' are meaningful; 'always' (the
       // default) and anything else normalize to undefined so bots.json stays clean.
       regularGroupMentionMode: entry.regularGroupMentionMode === 'topic' || entry.regularGroupMentionMode === 'never'

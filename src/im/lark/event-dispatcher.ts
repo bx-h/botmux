@@ -1165,7 +1165,7 @@ type RoutingDecision = {
 function regularGroupRouting(larkAppId: string, messageId: string, chatId: string): RoutingDecision {
   // tri-state: only `new-topic` forks a fresh thread-scope session. `shared`
   // stays chat-scope here (the topic fold happens post-routing, see
-  // maybeApplySharedTopicSeed); `chat` is the flat default. resolveRegularGroupMode
+  // maybeApplySharedTopicSeed); `chat` is an explicit flat opt-out. resolveRegularGroupMode
   // is the single decision point so new-topic and shared never both fire.
   if (resolveRegularGroupMode(larkAppId, chatId) === 'new-topic') {
     return { scope: 'thread', anchor: messageId, source: 'regular-group-thread' };

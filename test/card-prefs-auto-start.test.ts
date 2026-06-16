@@ -62,7 +62,7 @@ describe('card-prefs store — 主动开工 fields', () => {
     expect(prefs.autoStartOnGroupJoin).toBe(false);
     expect(prefs.autoStartOnNewTopic).toBe(false);
     expect(prefs.autoStartOnGroupJoinPrompt).toBe('');
-    expect(prefs.regularGroupReplyMode).toBe('chat');
+    expect(prefs.regularGroupReplyMode).toBe('new-topic');
     expect(prefs.regularGroupMentionMode).toBe('always');
   });
 
@@ -110,7 +110,7 @@ describe('card-prefs store — 主动开工 fields', () => {
       autoStartOnGroupJoin: true,
       autoStartOnGroupJoinPrompt: '旧的 prompt',
       autoStartOnNewTopic: true,
-      regularGroupReplyMode: 'new-topic',
+      regularGroupReplyMode: 'shared',
     });
     const { registry, store } = await freshModules();
     registry.loadBotConfigs().forEach(c => registry.registerBot(c));
@@ -119,7 +119,7 @@ describe('card-prefs store — 主动开工 fields', () => {
       autoStartOnGroupJoin: false,
       autoStartOnGroupJoinPrompt: '   ',
       autoStartOnNewTopic: false,
-      regularGroupReplyMode: 'chat',
+      regularGroupReplyMode: 'new-topic',
     });
 
     const disk = readConfig();
@@ -136,16 +136,16 @@ describe('card-prefs store — 主动开工 fields', () => {
   });
 
   it('partial patch leaves untouched fields intact', async () => {
-    writeConfig({ autoStartOnNewTopic: true, regularGroupReplyMode: 'new-topic' });
+    writeConfig({ autoStartOnNewTopic: true, regularGroupReplyMode: 'chat' });
     const { registry, store } = await freshModules();
     registry.loadBotConfigs().forEach(c => registry.registerBot(c));
 
-    // Only toggle the join flag; new-topic flag must survive.
+    // Only toggle the join flag; explicit chat opt-out must survive.
     await store.updateBotCardPrefs('app_default', { autoStartOnGroupJoin: true });
 
     const disk = readConfig();
     expect(disk.autoStartOnGroupJoin).toBe(true);
     expect(disk.autoStartOnNewTopic).toBe(true);
-    expect(disk.regularGroupReplyMode).toBe('new-topic');
+    expect(disk.regularGroupReplyMode).toBe('chat');
   });
 });
