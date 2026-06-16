@@ -9,7 +9,7 @@ import { atomicWriteFileSync } from '../../utils/atomic-write.js';
 import { join } from 'node:path';
 import { getBot, getAllBots, findOncallChat, getOwnerOpenId, type BotState } from '../../bot-registry.js';
 import { config } from '../../config.js';
-import { getChatInfo, getChatMode, getCachedChatMode, listChatBotMembers, replyMessage, sendUserMessage, isHumanOpenId, updateMessage } from './client.js';
+import { getChatInfo, getChatMode, listChatBotMembers, replyMessage, sendUserMessage, isHumanOpenId, updateMessage } from './client.js';
 import { logger } from '../../utils/logger.js';
 import { BoundedMap } from '../../utils/bounded-map.js';
 import { serializeByAnchor } from '../../utils/anchor-serializer.js';
@@ -1027,8 +1027,9 @@ async function maybeApplySharedTopicSeed(input: {
   routing: { scope: 'thread' | 'chat'; anchor: string };
   forceTopicApplied?: boolean;
   ownsThreadSession?: boolean;
+  ownsChatSession?: boolean;
 }): Promise<string | undefined> {
-  const { larkAppId, chatId, chatType, message, senderOpenId, messageId, routing, forceTopicApplied, ownsThreadSession } = input;
+  const { larkAppId, chatId, chatType, message, senderOpenId, messageId, routing, forceTopicApplied, ownsThreadSession, ownsChatSession } = input;
   if (forceTopicApplied) return undefined;
   if (ownsThreadSession) return undefined;
   if (chatType !== 'group') return undefined;
@@ -1038,10 +1039,18 @@ async function maybeApplySharedTopicSeed(input: {
   // still OPEN a topic (reply in a thread reusing the chat session), not fall
   // back to a flat top-level reply. So allow non-@ seeding only when never.
   if (!isBotMentioned(larkAppId, message, senderOpenId) && resolveGroupMentionMode(larkAppId) !== 'never') return undefined;
-  const freshMode = routing.scope === 'thread'
-    ? await getChatMode(larkAppId, chatId, { forceRefresh: true })
-    : (getCachedChatMode(larkAppId, chatId) ?? 'group');
-  if (freshMode !== 'group') return undefined;
+  const freshMode = await getChatMode(larkAppId, chatId, { forceRefresh: true });
+  if (freshMode !== 'group') {
+    if (routing.scope === 'chat' && !ownsChatSession) {
+      routing.scope = 'thread';
+      routing.anchor = messageId;
+      logger.info(
+        `[reply-mode] shared seed skipped because chat=${chatId.substring(0, 12)} is now ${freshMode}; ` +
+        `routing msg=${messageId.substring(0, 12)} as thread seed`,
+      );
+    }
+    return undefined;
+  }
   routing.scope = 'chat';
   routing.anchor = chatId;
   logger.info(`[reply-mode] shared turn msg=${messageId.substring(0, 12)} routes through chat=${chatId.substring(0, 12)}`);
@@ -1470,7 +1479,7 @@ export function startLarkEventDispatcher(larkAppId: string, larkAppSecret: strin
           ownsSession = handlers.isSessionOwner?.(routing.anchor, larkAppId) ?? false;
         } else {
           const seedReplyRootId = await maybeApplySharedTopicSeed({
-            larkAppId, chatId, chatType, message, senderOpenId, messageId, routing, forceTopicApplied, ownsThreadSession: ownsThreadSessionBeforeFold,
+            larkAppId, chatId, chatType, message, senderOpenId, messageId, routing, forceTopicApplied, ownsThreadSession: ownsThreadSessionBeforeFold, ownsChatSession: ownsSession,
           });
           if (seedReplyRootId) {
             replyRootId = seedReplyRootId;

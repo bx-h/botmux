@@ -248,7 +248,17 @@ describe('resolveReportTarget', () => {
     expect(r).toEqual({ orchChatId: 'oc_orch', orchScope: 'thread', orchRoot: 'om_root', orchOpenId: 'ou_orch' });
   });
 
-  it('CROSS-MACHINE: with no registry entry, derives from the session (chatId + chat-scope)', () => {
+  it('registry-missing fallback stays inside a topic when one is known', () => {
+    const r = resolveReportTarget({
+      registryEntry: undefined,
+      sessionChatId: 'oc_sub',
+      fallbackTopicRoot: 'om_current_topic',
+      creatorOpenId: 'ou_orch',
+    });
+    expect(r).toEqual({ orchChatId: 'oc_sub', orchScope: 'thread', orchRoot: 'om_current_topic', orchOpenId: 'ou_orch' });
+  });
+
+  it('registry-missing fallback has no thread target when no topic is known', () => {
     const r = resolveReportTarget({ registryEntry: undefined, sessionChatId: 'oc_sub', creatorOpenId: 'ou_orch' });
     expect(r).toEqual({ orchChatId: 'oc_sub', orchScope: 'chat', orchRoot: '', orchOpenId: 'ou_orch' });
   });

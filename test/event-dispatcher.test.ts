@@ -322,6 +322,8 @@ describe('im.message.receive_v1 — bot-to-bot @mention routing', () => {
     __resetAnchorQueues();
     __resetEventClaimsForTest();
     mockReplyMessage.mockClear();
+    mockGetChatMode.mockReset();
+    mockGetChatMode.mockResolvedValue('group');
     mockGetCachedChatMode.mockReset();
     mockGetCachedChatMode.mockReturnValue(undefined);
     mockRecordObservedBots.mockClear();
@@ -361,6 +363,7 @@ describe('im.message.receive_v1 — bot-to-bot @mention routing', () => {
   });
 
   it('routes @mentioned bot message to handleThreadReply', async () => {
+    mockGetChatMode.mockResolvedValue('topic');
     // Another bot sends a post message that @mentions this bot in a thread
     const postContent = JSON.stringify({
       zh_cn: {
@@ -390,6 +393,7 @@ describe('im.message.receive_v1 — bot-to-bot @mention routing', () => {
   });
 
   it('routes @mentioned bot message (via mentions array) to handleThreadReply', async () => {
+    mockGetChatMode.mockResolvedValue('topic');
     const event = makeBotMessageEvent({
       senderOpenId: OTHER_BOT_OPEN_ID,
       content: JSON.stringify({ text: '@BotA check this' }),
@@ -1209,6 +1213,32 @@ describe('im.message.receive_v1 — bot-to-bot @mention routing', () => {
     expect(handlers.handleNewTopic).not.toHaveBeenCalled();
   });
 
+  it('shared top-level @ rechecks chat_mode and seeds a thread when the group became a topic chat', async () => {
+    setupBotState({ regularGroupReplyMode: 'shared', allowedUsers: [USER_OPEN_ID] });
+    mockGetChatMode.mockResolvedValue('topic');
+    handlers.isSessionOwner.mockReturnValue(false);
+    const event = makeUserMessageEvent({
+      senderOpenId: USER_OPEN_ID,
+      content: JSON.stringify({ text: '@BotA stale cache should not create chat-scope' }),
+      messageId: 'msg-stale-mode-topic',
+      chatId: 'chat-stale-mode',
+      chatType: 'group',
+      mentions: [{ key: '@_bot_a', name: 'BotA', id: { open_id: MY_OPEN_ID } }],
+    });
+
+    await capturedHandlers['im.message.receive_v1'](event);
+    await flushEventWork();
+
+    expect(mockGetChatMode).toHaveBeenCalledWith(MY_APP_ID, 'chat-stale-mode', { forceRefresh: true });
+    expect(handlers.handleNewTopic).toHaveBeenCalledWith(event, expect.objectContaining({
+      scope: 'thread',
+      anchor: 'msg-stale-mode-topic',
+      replyRootId: undefined,
+      larkAppId: MY_APP_ID,
+    }));
+    expect(handlers.handleThreadReply).not.toHaveBeenCalled();
+  });
+
   it('shared thread-contained @ reuses the chat session and replies in the existing topic', async () => {
     setupBotState({ chatReplyModes: { 'chat-reply-mode': 'shared' }, allowedUsers: [USER_OPEN_ID] });
     mockGetChatMode.mockResolvedValue('group');
@@ -1813,7 +1843,7 @@ describe('im.message.receive_v1 — stale chat-scope detection (group → topic 
     expect(handlers.onChatModeConverted).not.toHaveBeenCalled();
   });
 
-  it('does NOT forceRefresh when no chat-scope session exists (no API waste)', async () => {
+  it('forceRefreshes shared seed even when no chat-scope session exists (avoid stale group cache)', async () => {
     mockGetChatMode.mockResolvedValue('group');
     handlers.isSessionOwner.mockReturnValue(false); // no chat-scope session
     // Clear mock history so we measure only this test's getChatMode calls
@@ -1835,7 +1865,7 @@ describe('im.message.receive_v1 — stale chat-scope detection (group → topic 
     const forceRefreshCalls = mockGetChatMode.mock.calls.filter(
       ([, , options]) => (options as { forceRefresh?: boolean } | undefined)?.forceRefresh === true,
     );
-    expect(forceRefreshCalls).toHaveLength(0);
+    expect(forceRefreshCalls).toHaveLength(1);
     expect(handlers.onChatModeConverted).not.toHaveBeenCalled();
   });
 });

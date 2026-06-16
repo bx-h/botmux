@@ -4199,10 +4199,8 @@ async function cmdReport(rest: string[]): Promise<void> {
 
   // Resolve where the report goes + who to @. Same-machine: the dispatch registry
   // (keyed by this sub-bot's thread root) carries the orchestrator's exact coords.
-  // CROSS-MACHINE: the orchestrator is on another machine, so its registry isn't
-  // on THIS one — resolveReportTarget falls back to this sub-bot's own session
-  // (report top-level into its chat, @ the dispatcher via creatorOpenId). See
-  // resolveReportTarget / Session.creatorOpenId.
+  // Registry-missing fallback must still stay inside a topic: leaking a report
+  // to the regular group's top-level would violate shared/topic routing.
   const regPath = join(resolveDataDir(), 'orchestrate-dispatch.json');
   let reg: Record<string, any> = {};
   try { if (existsSync(regPath)) reg = JSON.parse(readFileSync(regPath, 'utf-8')); } catch { /* */ }
@@ -4210,9 +4208,16 @@ async function cmdReport(rest: string[]): Promise<void> {
     .filter((x): x is string => !!x)
     .find((key) => !!reg[key]);
   const entry = entryKey ? reg[entryKey] : undefined;
+  if (!entry && !sourceTopicTarget) {
+    console.error(
+      '找不到主编排坐标，且当前会话没有可回退的话题锚点；为避免把 report 发到群主对话，已拒绝发送。\n' +
+      '请在被 dispatch 派活的话题里运行，或用 `botmux send --into <topic_root>` 明确指定目标。');
+    process.exit(1);
+  }
   const tgt = resolveReportTarget({
     registryEntry: entry,
     sessionChatId: s.chatId,
+    fallbackTopicRoot: sourceTopicTarget?.rootMessageId,
     creatorOpenId: s.creatorOpenId,
     ownerOpenId: s.ownerOpenId,
     quoteTargetSenderOpenId: s.quoteTargetSenderOpenId,
@@ -4235,12 +4240,11 @@ async function cmdReport(rest: string[]): Promise<void> {
   try {
     let msgId: string;
     if (tgt.orchScope === 'chat' || !tgt.orchRoot) {
-      // Orchestrator at chat scope, or cross-machine fallback → post top-level
-      // into the chat (the sub-topic's chat = the orchestrator's chat).
+      // Explicit flat-chat orchestrator (legacy/opt-out configuration).
       msgId = await sendMessage(appId, tgt.orchChatId, postJson, 'post');
     } else {
-      // Same-machine thread-scope orchestrator → reply into its thread so its
-      // existing context-rich session (anchored on orchRoot) receives the report.
+      // Same-machine thread-scope orchestrator, or registry-missing fallback
+      // into the current topic, never the regular group's top-level.
       msgId = await replyMessage(appId, tgt.orchRoot, postJson, 'post', true);
     }
     console.log(JSON.stringify({
