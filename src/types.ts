@@ -68,6 +68,12 @@ export interface Session {
    */
   replyThreadAliases?: { [rootMessageId: string]: { createdAt: string; lastUsedAt: string } };
   /**
+   * Chat-scope per-turn topic targets. Bridge final_output can arrive after a
+   * later inbound message updated currentReplyTarget; this map routes that old
+   * turn back to the topic that originally triggered it.
+   */
+  replyTurnTargets?: { [turnId: string]: { rootMessageId: string; updatedAt: string } };
+  /**
    * Current turn's reply destination for chat-scope topic aliases. `turnId` is
    * the inbound message_id that opened/updated this turn, preventing a stale
    * topic target from being confused with a later group-top-level turn.

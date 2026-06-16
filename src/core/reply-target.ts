@@ -1,12 +1,29 @@
 import type { DaemonSession } from './types.js';
 import type { Session } from '../types.js';
 
+const MAX_REPLY_TURN_TARGETS = 100;
+
 export type SessionReplyTarget =
   | { mode: 'plain'; chatId: string }
   | { mode: 'thread'; rootMessageId: string };
 
+type ReplyTurnTargets = { [turnId: string]: { rootMessageId: string; updatedAt: string } };
+
+function withReplyTurnTarget(
+  existing: ReplyTurnTargets | undefined,
+  turnId: string,
+  rootMessageId: string,
+  updatedAt: string,
+): ReplyTurnTargets {
+  const next = { ...(existing ?? {}), [turnId]: { rootMessageId, updatedAt } };
+  const entries = Object.entries(next);
+  if (entries.length <= MAX_REPLY_TURN_TARGETS) return next;
+  entries.sort((a, b) => a[1].updatedAt.localeCompare(b[1].updatedAt));
+  return Object.fromEntries(entries.slice(entries.length - MAX_REPLY_TURN_TARGETS));
+}
+
 export function resolveSessionReplyTarget(
-  ds: Pick<DaemonSession, 'scope' | 'chatId' | 'session' | 'currentReplyTarget'>,
+  ds: Pick<DaemonSession, 'scope' | 'chatId' | 'session' | 'currentReplyTarget' | 'replyTurnTargets'>,
   turnId?: string,
 ): SessionReplyTarget {
   const target = ds.currentReplyTarget ?? ds.session.currentReplyTarget;
@@ -14,6 +31,8 @@ export function resolveSessionReplyTarget(
     if (target?.rootMessageId && !!turnId && target.turnId === turnId) {
       return { mode: 'thread', rootMessageId: target.rootMessageId };
     }
+    const recorded = turnId ? (ds.replyTurnTargets?.[turnId] ?? ds.session.replyTurnTargets?.[turnId]) : undefined;
+    if (recorded?.rootMessageId) return { mode: 'thread', rootMessageId: recorded.rootMessageId };
     return { mode: 'plain', chatId: ds.chatId };
   }
   return { mode: 'thread', rootMessageId: ds.session.rootMessageId };
@@ -27,14 +46,19 @@ export function resolveSendTarget(opts: {
   rootMessageId: string;
   replyTargetRootId?: string;
   replyTargetTurnId?: string;
+  replyTurnTargetRootId?: string;
   currentTurnId?: string;
 }): SessionReplyTarget {
   if (opts.into) return { mode: 'thread', rootMessageId: opts.into };
   if (opts.topLevel) return { mode: 'plain', chatId: opts.chatId };
   if (opts.chatScope) {
-    return opts.replyTargetRootId && opts.replyTargetTurnId && opts.replyTargetTurnId === opts.currentTurnId
-      ? { mode: 'thread', rootMessageId: opts.replyTargetRootId }
-      : { mode: 'plain', chatId: opts.chatId };
+    if (opts.replyTargetRootId && opts.replyTargetTurnId && opts.replyTargetTurnId === opts.currentTurnId) {
+      return { mode: 'thread', rootMessageId: opts.replyTargetRootId };
+    }
+    if (opts.replyTurnTargetRootId && opts.currentTurnId) {
+      return { mode: 'thread', rootMessageId: opts.replyTurnTargetRootId };
+    }
+    return { mode: 'plain', chatId: opts.chatId };
   }
   return { mode: 'thread', rootMessageId: opts.rootMessageId };
 }
@@ -52,10 +76,13 @@ export function beginReplyTargetTurn(
       createdAt: aliases[replyRootId]?.createdAt ?? nowIso,
       lastUsedAt: nowIso,
     };
+    const turnTargets = withReplyTurnTarget(ds.replyTurnTargets ?? ds.session.replyTurnTargets, turnId, replyRootId, nowIso);
     const target = { rootMessageId: replyRootId, turnId, updatedAt: nowIso };
     ds.replyThreadAliases = aliases;
+    ds.replyTurnTargets = turnTargets;
     ds.currentReplyTarget = target;
     ds.session.replyThreadAliases = aliases;
+    ds.session.replyTurnTargets = turnTargets;
     ds.session.currentReplyTarget = target;
     return;
   }
@@ -82,5 +109,6 @@ export function fallbackTurnId(
 export function syncReplyTargetState(ds: DaemonSession, s?: Session): void {
   const source = s ?? ds.session;
   ds.replyThreadAliases = source.replyThreadAliases;
+  ds.replyTurnTargets = source.replyTurnTargets;
   ds.currentReplyTarget = source.currentReplyTarget;
 }
