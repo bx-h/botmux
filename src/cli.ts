@@ -28,7 +28,7 @@ import { createInterface } from 'node:readline';
 import { createRequire } from 'node:module';
 import { createHmac, randomBytes } from 'node:crypto';
 import { validateWorkingDir } from './core/working-dir.js';
-import { findAncestorSessionContext as findAncestorSessionContextFromMarkers } from './core/session-marker.js';
+import { resolveSessionContext } from './core/session-marker.js';
 import { parseDispatchBotSpec, buildDispatchMessages, buildRepoPrimeText, buildReportContent, eligibleAutoMentionAliases, offTopicSubBotTopic, resolveReportTarget, resolveSendTarget } from './core/dispatch.js';
 import { enableAutostart, disableAutostart, autostartStatus, refreshAutostart } from './autostart.js';
 import { tmuxEnv } from './setup/ensure-tmux.js';
@@ -56,6 +56,7 @@ import { invalidWorkingDirs } from './utils/working-dir.js';
 import { firstPositional } from './cli/arg-utils.js';
 import { dispatchPrimaryMessage, findStdinAliasAttachment, sendFileAttachments } from './cli/send-dispatch.js';
 import { buildPm2SpawnCommand } from './cli/pm2-command.js';
+import { callDashboard, type DashboardEndpoint, type DashboardResult } from './cli/dashboard-endpoint.js';
 import { rejectLikelyWindowsStdinMojibake } from './cli/stdin-encoding.js';
 import {
   formatBotInfoEntriesForCli,
@@ -1399,50 +1400,18 @@ function cmdUpgrade(): void {
 }
 
 /**
- * Call one of the dashboard's loopback HMAC `/__cli/*` endpoints.
- * - `/__cli/rotate` mints a fresh token and returns its URL, invalidating the
- *   previously-issued link.
- * - `/__cli/current` returns the existing token's URL WITHOUT rotating (404 →
- *   no token has ever been minted → `no-active-token`).
- * Returns { ok: true, url } on success, or { ok: false, reason } so callers can
- * decide how to surface the failure (hard error vs soft hint).
+ * Call one of the dashboard's loopback HMAC `/__cli/*` endpoints. Thin wrapper
+ * over {@link callDashboard}, which handles 404 disambiguation and self-heals a
+ * stale `.dashboard-port` that points at the wrong service (e.g. daemon IPC).
+ * See `src/cli/dashboard-endpoint.ts` for the why.
  */
-async function callDashboardEndpoint(
-  path: '/__cli/rotate' | '/__cli/current',
-): Promise<
-  | { ok: true; url: string }
-  | { ok: false; reason: 'no-secret' | 'unreachable' | 'http-error' | 'no-active-token'; detail?: string }
-> {
-  const SECRET_PATH = join(CONFIG_DIR, '.dashboard-secret');
-  if (!existsSync(SECRET_PATH)) return { ok: false, reason: 'no-secret' };
-  const secret = readFileSync(SECRET_PATH, 'utf8').trim();
-  const ts = Math.floor(Date.now() / 1000).toString();
-  const nonce = randomBytes(8).toString('hex');
-  const sig = createHmac('sha256', secret).update(`${ts}:${nonce}`).digest('base64url');
-  const portFile = join(CONFIG_DIR, '.dashboard-port');
-  const port = (existsSync(portFile) ? readFileSync(portFile, 'utf8').trim() : '')
-    || process.env.BOTMUX_DASHBOARD_PORT
-    || '7891';
-
-  let res: Response;
-  try {
-    res = await fetch(`http://127.0.0.1:${port}${path}`, {
-      method: 'POST',
-      headers: {
-        'X-Botmux-Cli-Ts': ts,
-        'X-Botmux-Cli-Nonce': nonce,
-        'X-Botmux-Cli-Auth': sig,
-      },
-    });
-  } catch {
-    return { ok: false, reason: 'unreachable' };
-  }
-  if (res.status === 404) return { ok: false, reason: 'no-active-token' };
-  if (!res.ok) {
-    return { ok: false, reason: 'http-error', detail: `${res.status} ${await res.text()}` };
-  }
-  const body = await res.json() as { url: string };
-  return { ok: true, url: body.url };
+async function callDashboardEndpoint(path: DashboardEndpoint): Promise<DashboardResult> {
+  return callDashboard({
+    configDir: CONFIG_DIR,
+    defaultPort: 7891,
+    envPort: process.env.BOTMUX_DASHBOARD_PORT,
+    path,
+  });
 }
 
 /**
@@ -1463,8 +1432,10 @@ async function printDashboardHintWithRetry(): Promise<void> {
       return;
     }
     // Terminal states — file-backed secret/token won't appear mid-poll, unlike
-    // a not-yet-listening port. Don't spin on them.
-    if (last.reason === 'no-secret' || last.reason === 'no-active-token') break;
+    // a not-yet-listening port. `wrong-service` means the port file points at a
+    // non-dashboard server and discovery already failed to find it, so retrying
+    // won't help either. Don't spin on any of them.
+    if (last.reason === 'no-secret' || last.reason === 'no-active-token' || last.reason === 'wrong-service') break;
     await new Promise(r => setTimeout(r, stepMs));
   }
   // Soft fallback
@@ -1472,6 +1443,8 @@ async function printDashboardHintWithRetry(): Promise<void> {
     console.log('   面板: 运行 `botmux dashboard` 获取链接');
   } else if (last?.reason === 'no-secret') {
     console.log('   面板: dashboard 凭证未就绪，启动后可用 `botmux dashboard` 获取链接');
+  } else if (last?.reason === 'wrong-service') {
+    console.log('   面板: `botmux dashboard`（端口文件可能已失效，必要时 `botmux restart` 刷新）');
   } else {
     console.log('   面板: `botmux dashboard`（daemon 启动中，稍后可获取链接）');
   }
@@ -1488,16 +1461,25 @@ async function cmdDashboard(): Promise<void> {
     console.log(r.url);
     return;
   }
+  const portFile = join(CONFIG_DIR, '.dashboard-port');
+  const recordedPort = (existsSync(portFile) ? readFileSync(portFile, 'utf8').trim() : '')
+    || process.env.BOTMUX_DASHBOARD_PORT
+    || '7891';
   if (r.reason === 'no-secret') {
     console.error('Dashboard not initialised. Run `botmux restart` first.');
   } else if (r.reason === 'unreachable') {
-    const portFile = join(CONFIG_DIR, '.dashboard-port');
-    const port = (existsSync(portFile) ? readFileSync(portFile, 'utf8').trim() : '')
-      || process.env.BOTMUX_DASHBOARD_PORT
-      || '7891';
     console.error(
-      `dashboard process not reachable on 127.0.0.1:${port} — \`botmux restart\` will start it`,
+      `dashboard process not reachable on 127.0.0.1:${recordedPort} — \`botmux restart\` will start it`,
     );
+  } else if (r.reason === 'wrong-service') {
+    // 127.0.0.1:<port> answered, but it isn't the dashboard (typically the
+    // daemon IPC server holding a port the stale .dashboard-port points at),
+    // and rediscovery across the probe range found no dashboard either.
+    console.error(
+      `127.0.0.1:${recordedPort} 上的服务不是 dashboard（端口文件 ~/.botmux/.dashboard-port 已失效，可能指向了 daemon IPC）。` +
+      '运行 `botmux restart` 重启 dashboard 并刷新端口文件。',
+    );
+    if (r.detail) console.error(`  详情: ${r.detail}`);
   } else {
     // `no-active-token` can't occur on rotate (it always mints); fall through.
     console.error('Rotation failed:', r.detail ?? r.reason);
@@ -1542,6 +1524,8 @@ interface SessionData {
   /** Chat-scope quote chain — see Session.quoteTargetId in types.ts. */
   quoteTargetId?: string;
   currentReplyTarget?: { rootMessageId: string; turnId: string; updatedAt: string };
+  /** 文档评论入口当前轮回评论落点（见 Session.currentDocCommentTarget in types.ts）。 */
+  currentDocCommentTarget?: { fileToken: string; fileType: string; commentId: string; replyToName?: string; replyToOpenId?: string; turnId: string };
   quoteTargetSenderOpenId?: string;
   quoteTargetSenderIsBot?: boolean;
   pendingResponseCardId?: string;
@@ -2672,15 +2656,14 @@ botmux v${getVersion()} — IM ↔ AI 编程 CLI 桥接
 // ─── Schedule subcommands ────────────────────────────────────────────────────
 
 /**
- * Walk the process tree looking for a CLI-pid marker written by the botmux
- * worker. Returns the sessionId stored in the marker (or '' if empty/legacy).
- *
- * This mirrors server.ts:findAncestorCliMarker but is local to cli.ts so
- * subcommands invoked from inside an agent session can auto-detect which
- * session they belong to.
+ * Resolve which botmux session this subcommand belongs to. Prefers the
+ * process-tree CLI-pid marker (carries the fresh turnId); falls back to the
+ * inherited BOTMUX_SESSION_ID env when the ancestry is broken (detached/
+ * backgrounded/deeply-nested invocations). See resolveSessionContext for why
+ * the env fallback is safe.
  */
 function findAncestorSessionContext(): { sessionId: string; turnId?: string } | null {
-  return findAncestorSessionContextFromMarkers(resolveDataDir());
+  return resolveSessionContext(resolveDataDir(), process.env.BOTMUX_SESSION_ID);
 }
 
 function normalizeSessionIdValue(value: unknown): string | null {
@@ -3383,6 +3366,61 @@ async function cmdSend(rest: string[]): Promise<void> {
       process.exit(1);
     }
     if (dir) { try { rmSync(dir, { recursive: true, force: true }); } catch { /* */ } }
+    return;
+  }
+
+  // ── 文档评论入口分流（/subscribe-lark-doc）──────────────────────────────────
+  // 本轮若由飞书文档评论触发（daemon 已把落点写进 session.currentDocCommentTarget），
+  // 把用户可见回复发表为飞书文档评论，而非发回飞书会话。绕过 @ 硬门（评论不 @ 飞书
+  // 用户）。显式改路由（--top-level / --chat-id / --into）时不分流，让模型仍能主动
+  // 「磁盘上有 currentDocCommentTarget」即权威信号=本轮是文档评论轮（beginNewTurn
+  // 在飞书轮已清盘）。故只看 docTarget 存在 + 无显式改路由，不再卡 turnId 相等
+  // （之前 currentTurnId 取自 cliPidMarker，文档轮里取值不稳导致误判落到 @ 硬门）。
+  const docTarget = s.currentDocCommentTarget;
+  if (docTarget && !sendTopLevel && !overrideChatId && !sendInto) {
+    const { registerBot, loadBotConfigs } = await import('./bot-registry.js');
+    try { for (const cfg of loadBotConfigs()) registerBot(cfg); } catch { /* */ }
+    const { replyToDocComment, chunkCommentText } = await import('./im/lark/doc-comment.js');
+    const appId = s.larkAppId!;
+    const loc = localeForBot(appId);
+    try {
+      // @ 落点：--mention-back → 回 @ 原评论人；--mention <open_id[:name]> → @ 指定人；
+      // 否则（--no-mention / 无）不 @。文档评论里靠 person 元素渲染 @，仅首块加。
+      let docMentionOpenId: string | undefined;
+      if (mentionBack) docMentionOpenId = docTarget.replyToOpenId;
+      else if (mentionArgs.length > 0) {
+        const first = mentionArgs[0];
+        const idx = first.indexOf(':');
+        docMentionOpenId = (idx > 0 ? first.slice(0, idx) : first).trim() || undefined;
+      }
+      // 嵌套回复到用户那条评论 thread（已挂其下，无需 ↪ 前缀）。
+      const chunks = chunkCommentText(content);
+      for (let i = 0; i < chunks.length; i++) {
+        await replyToDocComment(appId, { fileToken: docTarget.fileToken, fileType: docTarget.fileType }, docTarget.commentId, chunks[i], i === 0 ? docMentionOpenId : undefined);
+      }
+      // 写 bridge send marker → 抑制 worker 的 final_output 兜底（否则会再补一条评论）。
+      try {
+        const markerDir = join(resolveDataDir(), 'turn-sends');
+        if (!existsSync(markerDir)) mkdirSync(markerDir, { recursive: true });
+        appendFileSync(join(markerDir, `${sid}.jsonl`), JSON.stringify({ sentAtMs: Date.now(), messageId: `doc:${docTarget.commentId}`, contentLength: content.length }) + '\n');
+      } catch { /* best-effort：漏记只多一条兜底 */ }
+      // 收尾飞书侧占位卡（streaming-disabled 会话）避免停在「处理中」。
+      try {
+        const pendingCardId = claimPendingResponseCard(s);
+        const latest = pendingCardId ? loadSessionFresh(s) : undefined;
+        if (pendingCardId && latest?.pendingResponseCardId === pendingCardId) {
+          const { updateMessage } = await import('./im/lark/client.js');
+          const { buildMarkdownCard } = await import('./im/lark/md-card.js');
+          await updateMessage(appId, pendingCardId, buildMarkdownCard(t('daemon.doc_comment_replied_card', undefined, loc), undefined, resolveBrandLabel(appId), loc));
+          if (markPendingResponseCardPatchedIfCurrent(latest, pendingCardId)) saveSession(latest);
+        }
+      } catch { /* best-effort */ }
+      console.error(`✓ 已回复文档评论 ${docTarget.commentId.slice(0, 12)}（${chunks.length} 条）`);
+      console.log(JSON.stringify({ success: true, commentId: docTarget.commentId, sessionId: sid, kind: 'doc-comment', chunks: chunks.length }));
+    } catch (e: any) {
+      console.error(`文档评论发送失败：${e?.message ?? e}`);
+      process.exit(1);
+    }
     return;
   }
 

@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 import { config, getDashboardExternalHost } from './config.js';
+import { repoPickerScanOptions } from './global-config.js';
 import { writeHeartbeat } from './core/daemon-heartbeat.js';
 import { startMaintenance, stopMaintenance } from './core/maintenance.js';
 import { sendRestartReportIfPending } from './core/restart-report.js';
@@ -51,6 +52,7 @@ import {
   setActiveSessionsRegistry,
   forkWorker,
   killWorker,
+  reapOrphanWorkers,
   scheduleCardPatch,
   setCurrentCliVersion,
   getCurrentCliVersion,
@@ -105,7 +107,9 @@ import {
 } from './im/lark/workflow-progress-card.js';
 import { EventLog as WorkflowEventLog } from './workflows/events/append.js';
 import { replay as replayWorkflow } from './workflows/events/replay.js';
-import { isBotMentioned, probeBotOpenId, startLarkEventDispatcher, writeBotInfoFile, canOperate, evaluateTalk, grantCommandRestriction, isKnownPeerBot, checkRequiredScopes, type RoutingContext, type TalkEvaluation } from './im/lark/event-dispatcher.js';
+import { isBotMentioned, probeBotOpenId, startLarkEventDispatcher, writeBotInfoFile, canOperate, evaluateTalk, grantCommandRestriction, isKnownPeerBot, checkRequiredScopes, type RoutingContext, type TalkEvaluation, type DocCommentContext } from './im/lark/event-dispatcher.js';
+import { listAllDocSubscriptions, listDocSubscriptionsForSession, removeDocSubscription } from './services/doc-subs-store.js';
+import { subscribeDocFile, unsubscribeDocFile } from './im/lark/doc-comment.js';
 import { learnFromMentions, resolveSender, flushIdentityCacheSync } from './im/lark/identity-cache.js';
 import { normalizeBrand } from './im/lark/lark-hosts.js';
 import { renderBufferedSenderBlock } from './core/session-manager.js';
@@ -1452,6 +1456,13 @@ function getActiveCount(): number {
  * sees no visible response.
  */
 function beginNewTurn(ds: DaemonSession, title: string): void {
+  // 每开新轮先清掉上一轮可能残留的「回评论落点」并**落盘**——botmux send 子进程只
+  // 从磁盘读会话态判断"本轮是否文档评论轮"，所以磁盘必须权威：飞书轮清掉，文档轮
+  // 由随后的 handleDocComment 重新设值+落盘。只在确有残留时写盘，避免普通轮多余写。
+  if (ds.session.currentDocCommentTarget) {
+    ds.session.currentDocCommentTarget = undefined;
+    try { sessionStore.updateSession(ds.session); } catch { /* best-effort */ }
+  }
   // `/card` summon is one-shot: it forces a live card only for the turn it ran
   // in. A new turn returns to the config default (noCardChats / disableStreamingCard).
   // Use `/card on` to persistently restore cards for the chat.
@@ -2123,7 +2134,7 @@ async function startInitialPassthroughSession(args: {
 
   if (await replyInvalidWorkingDirs(anchor, larkAppId, ds)) return;
   const scanDirs = getProjectScanDirs(ds).filter(d => existsSync(d));
-  const projects = scanDirs.length > 0 ? scanMultipleProjects(scanDirs) : [];
+  const projects = scanDirs.length > 0 ? scanMultipleProjects(scanDirs, 3, repoPickerScanOptions()) : [];
   if (projects.length > 0) {
     lastRepoScan.set(chatId, projects);
     const cardJson = buildRepoSelectCard(projects, getSessionWorkingDir(ds), anchor, localeForBot(larkAppId));
@@ -2138,6 +2149,7 @@ async function startInitialPassthroughSession(args: {
   forkWorker(ds, '', false);
   logger.info(`[${tag(ds)}] No projects to select, queued initial raw passthrough ${commandContent.substring(0, 40)}`);
 }
+
 
 async function handleNewTopic(data: any, ctx: RoutingContext): Promise<void> {
   const { chatId, messageId, chatType, larkAppId, replyRootId } = ctx;
@@ -2474,7 +2486,7 @@ async function handleNewTopic(data: any, ctx: RoutingContext): Promise<void> {
   const scanDirs = getProjectScanDirs(ds).filter(d => existsSync(d));
   let projects: import('./services/project-scanner.js').ProjectInfo[] = [];
   if (scanDirs.length > 0) {
-    projects = scanMultipleProjects(scanDirs);
+    projects = scanMultipleProjects(scanDirs, 3, repoPickerScanOptions());
   }
   if (projects.length > 0) {
     lastRepoScan.set(chatId, projects);
@@ -2676,7 +2688,7 @@ async function handleBotAdded(chatId: string, operatorOpenId: string | undefined
     // No default dir → degrade to repo-selection card (D6 / FR-4).
     if (await replyInvalidWorkingDirs(anchor, larkAppId, ds)) return;
     const scanDirs = getProjectScanDirs(ds).filter(d => existsSync(d));
-    const projects = scanDirs.length > 0 ? scanMultipleProjects(scanDirs) : [];
+    const projects = scanDirs.length > 0 ? scanMultipleProjects(scanDirs, 3, repoPickerScanOptions()) : [];
     if (projects.length > 0) {
       lastRepoScan.set(chatId, projects);
       const cardJson = buildRepoSelectCard(projects, getSessionWorkingDir(ds), anchor, localeForBot(larkAppId));
@@ -3277,7 +3289,7 @@ async function handleThreadReply(data: any, ctx: RoutingContext): Promise<void> 
     const scanDirs2 = getProjectScanDirs(newDs).filter(d => existsSync(d));
     let projects: import('./services/project-scanner.js').ProjectInfo[] = [];
     if (scanDirs2.length > 0) {
-      projects = scanMultipleProjects(scanDirs2);
+      projects = scanMultipleProjects(scanDirs2, 3, repoPickerScanOptions());
     }
     if (projects.length > 0) {
       lastRepoScan.set(autoCreateChatId, projects);
@@ -3340,6 +3352,9 @@ async function handleThreadReply(data: any, ctx: RoutingContext): Promise<void> 
     // any restored streaming-card reference; worker_ready will POST a fresh
     // card instead of PATCHing the previous turn's card in place.
     logger.info(`[${tag(ds)}] Worker not running, re-forking...`);
+    // 这是飞书消息轮（非文档评论轮）：清掉可能残留的回评论落点，避免本轮 botmux
+    // send 误投到上一次文档评论（本路径不走 beginNewTurn，故显式清盘）。
+    ds.session.currentDocCommentTarget = undefined;
     if (ds.usageLimitRetryTimer) {
       clearTimeout(ds.usageLimitRetryTimer);
       ds.usageLimitRetryTimer = undefined;
@@ -3386,6 +3401,129 @@ async function handleThreadReply(data: any, ctx: RoutingContext): Promise<void> 
     await postPendingResponseCard(ds, parsed.messageId, parsed.content, await getThreadSender(), parsed.messageId);
     sessionStore.updateSession(ds.session);
     forkWorker(ds, wrappedPrompt, ds.hasHistory);
+  }
+}
+
+/**
+ * 文档评论入口（/subscribe-lark-doc）：一条命中订阅的文档评论喂进其绑定会话。
+ *
+ * 与 handleThreadReply 同构但精简：会话由订阅锚点直接定位（无需路由决策），
+ * 输入是评论纯文本（带「来自文档评论」前缀），并把本轮回评论的落点记进
+ * ds.docCommentTurns —— deliverFinalOutput 据此把正文发表为文档评论。状态卡 /
+ * 占位卡仍走会话起点（飞书），天然实现「卡片留飞书、正文进评论」的分流。
+ *
+ * MVP 边界：仅投递给 activeSessions 里仍在的会话（含 idle 挂起、worker=null —
+ * 走 resume 重 fork）；已 /close 的会话其订阅在关闭时已退订，这里查不到 ds 即跳过。
+ */
+async function handleDocComment(ctx: DocCommentContext): Promise<void> {
+  const { larkAppId, sub, commentId, text } = ctx;
+  const turnId = ctx.replyId || commentId;
+  const loc = localeForBot(larkAppId);
+
+  const ds = activeSessions.get(sessionKey(sub.sessionAnchor, larkAppId));
+  if (!ds) {
+    logger.info(`[doc-comment] no active session at anchor=${sub.sessionAnchor.slice(0, 12)} (app=${larkAppId}); dropping comment ${commentId.slice(0, 12)}`);
+    return;
+  }
+
+  const sender = ctx.authorOpenId ? await resolveSender(larkAppId, ctx.authorOpenId, 'user') : undefined;
+  const authorName = sender?.name || ctx.authorOpenId?.slice(0, 8) || '?';
+  const promptContent = `${tr('daemon.doc_comment_prefix', { author: authorName }, loc)}\n${text}`;
+
+  // 记录本轮回评论的落点。两条路都要覆盖：
+  //   • ds.docCommentTurns（内存，按 turnId）→ deliverFinalOutput「兜底」分流用
+  //   • session.currentDocCommentTarget（磁盘）→ `botmux send`「主回复」分流用
+  //     （botmux send 跑在独立子进程，只能从磁盘读会话态）
+  (ds.docCommentTurns ??= new Map()).set(turnId, {
+    fileToken: sub.fileToken,
+    fileType: sub.fileType,
+    commentId,
+    replyToOpenId: ctx.authorOpenId,
+    replyToName: sender?.name,
+  });
+  const docTarget = { fileToken: sub.fileToken, fileType: sub.fileType, commentId, replyToName: sender?.name, replyToOpenId: ctx.authorOpenId, turnId };
+
+  const dsBotCfg = getBot(ds.larkAppId).config;
+  const selfBot = getBot(ds.larkAppId);
+
+  if (ds.worker && !ds.worker.killed) {
+    const isBridge = !!ds.adoptedFrom;
+    const msgContent = isBridge
+      ? buildBridgeInputContent(promptContent, {
+          selfMention: { name: selfBot.botName, openId: selfBot.botOpenId },
+        })
+      : buildFollowUpContent(promptContent, ds.session.sessionId, {
+          isAdoptMode: false,
+          cliId: dsBotCfg.cliId,
+          cliPathOverride: dsBotCfg.cliPathOverride,
+          sender,
+          larkAppId,
+          chatId: ds.session.chatId,
+        });
+    beginNewTurn(ds, text);
+    ds.session.currentDocCommentTarget = docTarget; // beginNewTurn 刚清空，这里设本轮落点
+    rememberLastCliInput(ds, promptContent, msgContent);
+    sessionStore.updateSession(ds.session); // 先落盘，botmux send 子进程才读得到落点
+    await postPendingResponseCard(ds, commentId, text, sender, turnId);
+    ds.worker.send({ type: 'message', content: msgContent, turnId } as DaemonToWorker);
+    logger.info(`[${tag(ds)}] doc-comment turn injected (turn ${turnId.slice(0, 8)})`);
+  } else {
+    // Worker 挂起 / 已退出 —— resume 重 fork（与 handleThreadReply 同路）。
+    logger.info(`[${tag(ds)}] Worker not running for doc-comment, re-forking...`);
+    if (ds.usageLimitRetryTimer) { clearTimeout(ds.usageLimitRetryTimer); ds.usageLimitRetryTimer = undefined; }
+    ds.usageLimit = undefined;
+    ds.currentTurnTitle = text.substring(0, 50);
+    parkStreamCard(ds);
+    ds.streamCardId = undefined;
+    ds.streamCardNonce = undefined;
+    ds.streamCardPending = true;
+    ds.currentImageKey = undefined;
+    persistStreamCardState(ds);
+    const wrappedPrompt = buildReforkPrompt(ds, promptContent, {
+      cliId: dsBotCfg.cliId,
+      cliPathOverride: dsBotCfg.cliPathOverride,
+      selfMention: { name: selfBot.botName, openId: selfBot.botOpenId },
+      sender,
+    });
+    ds.session.currentDocCommentTarget = docTarget;
+    rememberLastCliInput(ds, promptContent, wrappedPrompt);
+    await postPendingResponseCard(ds, commentId, text, sender, turnId);
+    sessionStore.updateSession(ds.session);
+    forkWorker(ds, wrappedPrompt, ds.hasHistory);
+  }
+}
+
+/**
+ * daemon 启动恢复文档订阅：飞书订阅可能在停机期间失效，给仍活跃的会话重新
+ * 订阅；其会话没被恢复（已 /close 或丢失）的订阅则退订 + 清注册表。best-effort。
+ */
+async function restoreDocSubscriptions(_sessions: Map<string, DaemonSession>): Promise<void> {
+  for (const bot of getAllBots()) {
+    const appId = bot.config.larkAppId;
+    let subs;
+    try { subs = listAllDocSubscriptions(config.session.dataDir, appId); } catch { continue; }
+    for (const sub of subs) {
+      const file = { fileToken: sub.fileToken, fileType: sub.fileType };
+      // 判定保留/退订以**持久化的会话状态**为准（不看内存 activeSessions，避免恢复
+      // 时序 / keying 差异误删活跃会话的订阅）。只有「明确已关闭」才退订清表：
+      //   • 有 sessionId 且其会话 status==='closed' → 真的关了 → 退订 + 删表
+      //   • 会话不存在（被清理）→ 同上
+      //   • 会话 active / 缺 sessionId（老订阅，无从判定）→ 保留 + 重订阅（保守，不误删）
+      const stored = sub.sessionId ? sessionStore.getSession(sub.sessionId) : undefined;
+      const definitelyClosed = sub.sessionId && (!stored || stored.status === 'closed');
+      if (definitelyClosed) {
+        await unsubscribeDocFile(appId, file);
+        removeDocSubscription(config.session.dataDir, appId, sub.fileToken);
+        logger.info(`[doc-comment] restore: dropped subscription ${sub.fileToken.slice(0, 12)} (session ${sub.sessionId?.slice(0, 8)} closed)`);
+        continue;
+      }
+      try {
+        await subscribeDocFile(appId, file);
+        logger.info(`[doc-comment] restore: re-subscribed ${sub.fileToken.slice(0, 12)} (session ${sub.sessionId?.slice(0, 8) ?? '?'})`);
+      } catch (err: any) {
+        logger.warn(`[doc-comment] restore: re-subscribe ${sub.fileToken.slice(0, 12)} failed: ${err?.message ?? err}`);
+      }
+    }
   }
 }
 
@@ -3651,6 +3789,7 @@ export async function startDaemon(botIndex?: number): Promise<void> {
       handleNewTopic: (data, ctx) => handleNewTopic(data, ctx),
       handleThreadReply: (data, ctx) => handleThreadReply(data, ctx),
       handleBotAdded: (chatId, operatorOpenId, appId) => handleBotAdded(chatId, operatorOpenId, appId),
+      handleDocComment: (ctx) => handleDocComment(ctx),
       isSessionOwner: (anchor, appId) => activeSessions.has(sessionKey(anchor, appId)),
       resolveReplyThreadAlias: (rootId, chatId, appId) => findChatReplyAlias(rootId, chatId, appId),
       // Chat was converted 普通群 → 话题群 while we held a chat-scope session.
@@ -3669,8 +3808,19 @@ export async function startDaemon(botIndex?: number): Promise<void> {
     }, normalizeBrand(cfg.brand));
   }
 
+  // Reap workers orphaned by a previous daemon that was hard-killed (SIGKILL /
+  // OOM / crash) and so skipped graceful shutdown — they're re-parented to init
+  // (ppid==1) and untracked by any session.pid, so killStalePids can't reach
+  // them. Without this they leak ~0.5 GB each and accumulate across restarts.
+  // See reapOrphanWorkers() in worker-pool.ts.
+  reapOrphanWorkers();
+
   // Restore active sessions from previous run
   await restoreActiveSessions(activeSessions);
+
+  // 文档订阅恢复：重启后订阅可能已失效，给仍活跃的会话重订阅；会话没恢复
+  // （已关/丢失）的订阅则退订 + 清表，避免「命中订阅但无会话」的孤儿。
+  await restoreDocSubscriptions(activeSessions);
 
   // Sweep orphan sandbox overlays left by a previous run's crash/kill: any
   // <dataDir>/sandboxes/<sid> whose session is no longer active gets its

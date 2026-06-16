@@ -7,6 +7,7 @@ import { join, resolve, basename } from 'node:path';
 import { config } from '../config.js';
 import { buildTerminalUrl } from './terminal-url.js';
 import { getBot, getAllBots, getBotOpenId } from '../bot-registry.js';
+import { repoPickerScanOptions } from '../global-config.js';
 import * as sessionStore from '../services/session-store.js';
 import * as scheduleStore from '../services/schedule-store.js';
 import * as scheduler from './scheduler.js';
@@ -27,7 +28,13 @@ import { validateWorkingDir } from './working-dir.js';
 import { discoverAdoptableSessions, validateAdoptTarget, adoptTargetKey, adoptTargetLabel, type AdoptableSession } from './session-discovery.js';
 import { discoverAdoptableZellijSessions, validateZellijAdoptTarget, type ZellijAdoptableSession } from './zellij-adopt-discovery.js';
 import { listCodexAppThreads, type CodexAppThreadSummary } from '../services/codex-app-threads.js';
-import { generateAuthUrl, getTokenStatus } from '../utils/user-token.js';
+import { generateAuthUrl, getTokenStatus, resolveUserToken, DOC_COMMENT_OAUTH_SCOPES } from '../utils/user-token.js';
+import { resolveDocFile, subscribeDocFile, unsubscribeDocFile } from '../im/lark/doc-comment.js';
+import { UserTokenMissingError } from '../im/lark/client.js';
+import {
+  putDocSubscription, removeDocSubscription, listDocSubscriptionsForSession,
+  type CommentTriggerMode,
+} from '../services/doc-subs-store.js';
 import { bindOncall, unbindOncall, getOncallStatus } from '../services/oncall-store.js';
 import {
   CONFIG_FIELDS, findConfigField, settableFieldKeys, parseBooleanValue,
@@ -48,7 +55,7 @@ import { t, localeForBot, type Locale } from '../i18n/index.js';
 
 // ─── Exported constants ──────────────────────────────────────────────────────
 
-export const DAEMON_COMMANDS = new Set(['/close', '/restart', '/status', '/help', '/cd', '/repo', '/schedule', '/role', '/botconfig', '/pair', '/login', '/adopt', '/detach', '/disconnect', '/oncall', '/group', '/g', '/relay', '/card', '/term', '/list-slash-command', '/slash', '/land']);
+export const DAEMON_COMMANDS = new Set(['/close', '/restart', '/status', '/help', '/cd', '/repo', '/schedule', '/role', '/botconfig', '/pair', '/login', '/adopt', '/detach', '/disconnect', '/oncall', '/group', '/g', '/relay', '/card', '/term', '/list-slash-command', '/slash', '/land', '/subscribe-lark-doc']);
 
 /**
  * Daemon commands that act on the chat itself rather than opening a
@@ -314,6 +321,7 @@ function invalidConfiguredWorkingDirs(ds: DaemonSession | undefined, larkAppId: 
     workingDirs: config.daemon.workingDirs,
   });
 }
+
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -1333,7 +1341,7 @@ export async function handleCommand(
           await sessionReply(rootId, t('cmd.repo.scan_dir_not_exist', { dirs: scanDirs.join(', ') }, loc));
           break;
         }
-        const projects = scanMultipleProjects(validDirs);
+        const projects = scanMultipleProjects(validDirs, 3, repoPickerScanOptions());
         if (projects.length === 0) {
           await sessionReply(rootId, t('cmd.repo.no_git_repos', { dirs: validDirs.join(', ') }, loc));
           break;
@@ -1449,6 +1457,87 @@ export async function handleCommand(
           t('cmd.login.footer', undefined, loc),
           t('cmd.login.status_hint', undefined, loc),
         ].join('\n'));
+        break;
+      }
+
+      case '/subscribe-lark-doc': {
+        if (!ds || !larkAppId) { await sessionReply(rootId, t('cmd.subdoc.no_session', undefined, loc)); break; }
+        const arg = message.content.replace(/^\/subscribe-lark-doc\s*/i, '').trim();
+        const anchor = sessionAnchorId(ds);
+        const dataDir = config.session.dataDir;
+        const modeLabel = (m: CommentTriggerMode) =>
+          t(m === 'all' ? 'cmd.subdoc.mode_all' : 'cmd.subdoc.mode_mention', undefined, loc);
+
+        if (arg === 'list' || arg === '列表') {
+          const subs = listDocSubscriptionsForSession(dataDir, larkAppId, anchor);
+          if (!subs.length) { await sessionReply(rootId, t('cmd.subdoc.none', undefined, loc)); break; }
+          const lines = subs.map(s => `• ${s.docTitle || s.fileToken}（${modeLabel(s.commentTriggerMode)}）`);
+          await sessionReply(rootId, [t('cmd.subdoc.list_title', undefined, loc), ...lines].join('\n'));
+          break;
+        }
+
+        if (arg === 'off' || arg === 'stop' || arg === '退订') {
+          const subs = listDocSubscriptionsForSession(dataDir, larkAppId, anchor);
+          for (const s of subs) {
+            await unsubscribeDocFile(larkAppId, { fileToken: s.fileToken, fileType: s.fileType });
+            removeDocSubscription(dataDir, larkAppId, s.fileToken);
+          }
+          await sessionReply(rootId, t('cmd.subdoc.unsubscribed', { count: subs.length }, loc));
+          break;
+        }
+
+        if (!arg) { await sessionReply(rootId, t('cmd.subdoc.usage', undefined, loc)); break; }
+
+        // 评论事件官方推荐用户身份订阅，tenant 订阅大概率收不到推送 → 需要带文档 scope
+        // 的 User Token。文档 scope 不在通用 /login 里（避免污染所有 bot 的登录），
+        // 这里按需生成带 DOC_COMMENT_OAUTH_SCOPES 的专用授权链接。
+        const subCfg = getBot(larkAppId).config;
+        const replyDocLogin = async () => {
+          const { authUrl } = generateAuthUrl(subCfg.larkAppId, subCfg.larkAppSecret, normalizeBrand(subCfg.brand), DOC_COMMENT_OAUTH_SCOPES);
+          await sessionReply(rootId, [
+            t('cmd.subdoc.need_login', undefined, loc),
+            '',
+            t('cmd.login.step1', undefined, loc),
+            authUrl,
+            '',
+            t('cmd.login.step2', undefined, loc),
+            t('cmd.login.step3', undefined, loc),
+          ].join('\n'));
+        };
+        const userTok = await resolveUserToken(subCfg.larkAppId, subCfg.larkAppSecret, normalizeBrand(subCfg.brand));
+        if (!userTok) { await replyDocLogin(); break; }
+
+        try {
+          const file = await resolveDocFile(larkAppId, arg);
+          await subscribeDocFile(larkAppId, file);
+          const mode: CommentTriggerMode = subCfg.docSubscribeDefaultMode === 'all' ? 'all' : 'mention-only';
+          const { previous } = putDocSubscription(dataDir, larkAppId, {
+            fileToken: file.fileToken,
+            fileType: file.fileType,
+            sessionAnchor: anchor,
+            sessionId: ds.session.sessionId,
+            scope: ds.scope,
+            chatId: ds.chatId,
+            commentTriggerMode: mode,
+            ownerOpenId: message.senderId,
+            createdAt: Date.now(),
+          });
+          const title = file.fileToken.slice(0, 12);
+          const rebound = previous && previous.sessionAnchor !== anchor;
+          await sessionReply(rootId, t(
+            rebound ? 'cmd.subdoc.subscribed_moved' : 'cmd.subdoc.subscribed',
+            { title, mode: modeLabel(mode) },
+            loc,
+          ));
+          logger.info(`[${logTag}] /subscribe-lark-doc → ${file.fileType}:${file.fileToken.slice(0, 12)} mode=${mode}${rebound ? ' (rebound)' : ''}`);
+        } catch (err) {
+          // token 缺失 / 失效 / 缺文档 scope（403）→ 给带文档 scope 的重新授权链接。
+          if (err instanceof UserTokenMissingError) {
+            await replyDocLogin();
+          } else {
+            await sessionReply(rootId, t('cmd.subdoc.failed', { err: err instanceof Error ? err.message : String(err) }, loc));
+          }
+        }
         break;
       }
 
@@ -2310,6 +2399,7 @@ export async function handleCommand(
           t('help.status', undefined, loc),
           t('help.card', undefined, loc),
           t('help.term', undefined, loc),
+          t('help.subscribe_doc', undefined, loc),
           '',
           t('help.heading_passthrough', { cliName }, loc),
           // 直接从集合渲染，保证文案与 PASSTHROUGH_COMMANDS 不漂移

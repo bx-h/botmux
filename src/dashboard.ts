@@ -11,7 +11,7 @@ import { logger } from './utils/logger.js';
 import { config } from './config.js';
 import { listenWithProbe } from './utils/listen-with-probe.js';
 import {
-  generateToken, parseCookie, buildSetCookie, verifyHmac, decideDashboardAuth,
+  generateToken, parseCookie, buildSetCookie, verifyHmac, cliAuthBind, decideDashboardAuth,
   loadPersistedToken, persistToken,
 } from './dashboard/auth.js';
 import { DaemonRegistry } from './dashboard/registry.js';
@@ -29,7 +29,7 @@ import { getRunsDir } from './workflows/runs-dir.js';
 import { BotOnboardingManager } from './dashboard/bot-onboarding.js';
 import { CLI_SELECT_OPTIONS, resolveCliSelection } from './setup/cli-selection.js';
 import { invalidWorkingDirs } from './utils/working-dir.js';
-import { mergeDashboardConfig, mergeGlobalConfig, mergeMaintenanceConfig, parseMaintenancePatch, readGlobalConfig, setGlobalLocale, type DashboardGlobalConfig, type MaintenanceConfig } from './global-config.js';
+import { mergeDashboardConfig, mergeGlobalConfig, mergeMaintenanceConfig, parseMaintenancePatch, readGlobalConfig, setGlobalLocale, type DashboardGlobalConfig, type MaintenanceConfig, type RepoPickerMode } from './global-config.js';
 import { isLocale } from './i18n/types.js';
 import { isLocalDevInstall } from './utils/install-info.js';
 import { listTeamReports, readTeamBoard, setTeamBoardEntry } from './services/team-board-store.js';
@@ -90,6 +90,7 @@ const attaching = new Set<string>();   // dedup concurrent attaches per appId
 interface ResolvedDashboardSettings {
   publicReadOnly: boolean;
   openTerminalInFeishu: boolean;
+  repoPickerMode: RepoPickerMode;
   /** Auto-update / auto-restart schedule (off by default). */
   maintenance: MaintenanceConfig;
   /** True when running from a source checkout — the Settings UI greys out the
@@ -98,11 +99,13 @@ interface ResolvedDashboardSettings {
 }
 
 function resolveDashboardSettings(): ResolvedDashboardSettings {
-  const dashboard = readGlobalConfig().dashboard ?? {};
+  const global = readGlobalConfig();
+  const dashboard = global.dashboard ?? {};
   return {
     publicReadOnly: dashboard.publicReadOnly ?? config.dashboard.publicReadOnly,
     openTerminalInFeishu: dashboard.openTerminalInFeishu === true,
-    maintenance: readGlobalConfig().maintenance ?? {},
+    repoPickerMode: global.repoPickerMode ?? 'all',
+    maintenance: global.maintenance ?? {},
     localDevInstall: isLocalDevInstall(),
   };
 }
@@ -384,8 +387,15 @@ async function closeSessionsMatching(
 /**
  * Shared loopback-HMAC gate for the `/__cli/*` endpoints. Returns `{ ok: true }`
  * on success, or a ready-to-send `{ status, body }` error otherwise.
+ *
+ * The HMAC is bound to `method + pathname + the port WE actually bound`
+ * (`boundDashboardPort`, not the attacker-controllable Host header). That scopes
+ * a captured credential to this exact route on this exact dashboard, so a
+ * malicious local server handed a `botmux dashboard` discovery probe can't
+ * forward those headers to a different `/__cli/*` route or to the real dashboard
+ * on another port. See {@link cliAuthBind}.
  */
-function verifyCliRequest(req: IncomingMessage):
+function verifyCliRequest(req: IncomingMessage, pathname: string):
   | { ok: true }
   | { ok: false; status: number; body: Record<string, unknown> } {
   const ts = req.headers['x-botmux-cli-ts'];
@@ -395,7 +405,8 @@ function verifyCliRequest(req: IncomingMessage):
     return { ok: false, status: 400, body: { error: 'missing_headers' } };
   }
   const remote = (req.socket.remoteAddress ?? '').replace(/^::ffff:/, '');
-  const r = verifyHmac(SECRET, { ts, nonce, sig }, remote);
+  const bind = cliAuthBind(req.method ?? 'POST', pathname, boundDashboardPort);
+  const r = verifyHmac(SECRET, { ts, nonce, sig }, remote, bind);
   if (!r.ok) return { ok: false, status: 401, body: { error: 'unauthorized', reason: r.reason } };
   return { ok: true };
 }
@@ -435,7 +446,7 @@ const server = createServer(async (req, res) => {
     // CLI rotate (HMAC + loopback only) — for `botmux dashboard`. Mints a fresh
     // token, invalidating any previously-issued link.
     if (req.method === 'POST' && url.pathname === '/__cli/rotate') {
-      const gate = verifyCliRequest(req);
+      const gate = verifyCliRequest(req, url.pathname);
       if (!gate.ok) return jsonRes(res, gate.status, gate.body);
       activeToken = generateToken();
       try {
@@ -451,7 +462,7 @@ const server = createServer(async (req, res) => {
     // dashboard link survives restart untouched. 404 → no token has ever been
     // minted (caller falls back to suggesting `botmux dashboard`).
     if (req.method === 'POST' && url.pathname === '/__cli/current') {
-      const gate = verifyCliRequest(req);
+      const gate = verifyCliRequest(req, url.pathname);
       if (!gate.ok) return jsonRes(res, gate.status, gate.body);
       if (!activeToken) return jsonRes(res, 404, { error: 'no_active_token' });
       return jsonRes(res, 200, { url: dashboardUrlFor(activeToken) });
@@ -582,6 +593,12 @@ const server = createServer(async (req, res) => {
       }
       let touched = false;
       if (Object.keys(patch).length > 0) { mergeDashboardConfig(patch); touched = true; }
+      if ('repoPickerMode' in body) {
+        const v = body.repoPickerMode;
+        if (v !== 'all' && v !== 'repos') return jsonRes(res, 400, { ok: false, error: 'invalid_repoPickerMode' });
+        mergeGlobalConfig({ repoPickerMode: v });
+        touched = true;
+      }
       if ('maintenance' in body) {
         const r = parseMaintenancePatch(body.maintenance);
         if (!r.ok) return jsonRes(res, 400, { ok: false, error: r.error });
