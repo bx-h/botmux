@@ -29,7 +29,7 @@ import { createRequire } from 'node:module';
 import { createHmac, randomBytes } from 'node:crypto';
 import { validateWorkingDir } from './core/working-dir.js';
 import { findAncestorSessionContext as findAncestorSessionContextFromMarkers } from './core/session-marker.js';
-import { parseDispatchBotSpec, buildDispatchMessages, buildRepoPrimeText, buildReportContent, eligibleAutoMentionAliases, offTopicSubBotTopic, resolveReportTarget, resolveReportTopicTarget, resolveSendTarget } from './core/dispatch.js';
+import { parseDispatchBotSpec, buildDispatchMessages, buildRepoPrimeText, buildReportContent, eligibleAutoMentionAliases, offTopicSubBotTopic, resolveNewTopicDispatchPolicy, resolveReportTarget, resolveReportTopicTarget, resolveSendTarget } from './core/dispatch.js';
 import { enableAutostart, disableAutostart, autostartStatus, refreshAutostart } from './autostart.js';
 import { tmuxEnv } from './setup/ensure-tmux.js';
 import { writeBotsJsonAtomic as writeBotsAtomic } from './setup/bots-store.js';
@@ -3934,7 +3934,7 @@ async function cmdDispatch(rest: string[]): Promise<void> {
 用法:
   新开话题派活:
     botmux dispatch --title "子项目标题" --bot <open_id[:名字[:角色]]> [--bot ...] \\
-        [--brief "简报" | --brief-file <path>] [--repo <工作目录>] [--standby]
+        [--brief "简报" | --brief-file <path>] [--repo <工作目录>] [--standby] [--allow-new-topic]
   往已有话题追加（激活待命 bot / 追加协调）:
     botmux dispatch --into <话题根消息id> --bot <spec> [--bot ...] (--brief ... | --brief-file ...)
 
@@ -3952,6 +3952,7 @@ async function cmdDispatch(rest: string[]): Promise<void> {
   --brief-file <path>   从文件读取简报
   --repo <path>         预设子 bot 工作目录（绝对路径，需在子 bot 所在机器上存在）
   --standby             仅 --repo 待命，不派简报
+  --allow-new-topic     当前已有用户话题时，仍显式新开子项目话题（仅用户明确要求多话题时使用）
   --into <root_id>      回到已有话题线程追加（与 --title/种子互斥）
   --chat-id <id>        覆盖目标群（默认当前会话所在群）
   --session-id <id>     指定来源会话（默认自动推断）`);
@@ -3966,6 +3967,7 @@ async function cmdDispatch(rest: string[]): Promise<void> {
   const repo = argValue(rest, '--repo');
   const intoRoot = argValue(rest, '--into');
   const standby = rest.includes('--standby');
+  const allowNewTopic = rest.includes('--allow-new-topic') || rest.includes('--multi-topic');
   const botSpecs = argValues(rest, '--bot');
 
   let brief = argValue(rest, '--brief') ?? '';
@@ -4046,6 +4048,20 @@ async function cmdDispatch(rest: string[]): Promise<void> {
 
   const targetChatId = overrideChatId ?? s.chatId;
   if (!targetChatId) { console.error(`session ${sid} 缺少 chatId，且未提供 --chat-id`); process.exit(1); }
+
+  const newTopicPolicy = resolveNewTopicDispatchPolicy({
+    intoRoot,
+    allowNewTopic,
+    sourceTopicRoot: reportTopicTarget?.rootMessageId,
+  });
+  if (!newTopicPolicy.allowed) {
+    console.error([
+      `当前会话已在话题 ${newTopicPolicy.rootMessageId} 中，默认不再新开「子项目」话题。`,
+      '请在当前话题内继续协作：用 `botmux send --mention <open_id:名字> ...`，或 `botmux dispatch --into <当前话题root> ...`。',
+      '只有用户明确要求多话题/多子项目并行时，才重试并加 `--allow-new-topic`。',
+    ].join('\n'));
+    process.exit(1);
+  }
 
   const { registerBot, loadBotConfigs } = await import('./bot-registry.js');
   try { for (const cfg of loadBotConfigs()) registerBot(cfg); } catch { /* */ }

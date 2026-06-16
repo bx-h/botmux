@@ -166,6 +166,19 @@ export function buildReportContent(input: {
   return paras;
 }
 
+export function resolveNewTopicDispatchPolicy(input: {
+  intoRoot?: string;
+  allowNewTopic?: boolean;
+  sourceTopicRoot?: string | null;
+}): { allowed: true } | { allowed: false; rootMessageId: string } {
+  const intoRoot = input.intoRoot?.trim();
+  const sourceTopicRoot = input.sourceTopicRoot?.trim();
+  if (!intoRoot && !input.allowNewTopic && sourceTopicRoot) {
+    return { allowed: false, rootMessageId: sourceTopicRoot };
+  }
+  return { allowed: true };
+}
+
 /**
  * Footgun guard for the orchestrator→sub-bot direction. A dispatched sub-bot's
  * session lives **inside its sub-topic**, so @-mentioning it from the main chat
