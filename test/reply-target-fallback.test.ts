@@ -147,25 +147,6 @@ describe('beginReplyTargetTurn', () => {
     expect(ds.currentReplyTarget).toEqual({ rootMessageId: 'om_topic', turnId: 'turn-legacy', updatedAt: NOW });
     expect(resolveSessionReplyTarget(ds, 'turn-legacy')).toEqual({ mode: 'thread', rootMessageId: 'om_topic' });
   });
-
-  it('keeps only recent per-turn topic targets to bound persisted session size', () => {
-    const ds = makeDs() as DaemonSession;
-
-    for (let i = 0; i < 105; i += 1) {
-      beginReplyTargetTurn(
-        ds,
-        `om_topic_${i}`,
-        `turn-${i}`,
-        new Date(Date.parse(NOW) + i * 1000).toISOString(),
-      );
-    }
-
-    expect(Object.keys(ds.session.replyTurnTargets ?? {})).toHaveLength(100);
-    expect(ds.session.replyTurnTargets?.['turn-0']).toBeUndefined();
-    expect(ds.session.replyTurnTargets?.['turn-4']).toBeUndefined();
-    expect(ds.session.replyTurnTargets?.['turn-5']).toEqual(expect.objectContaining({ rootMessageId: 'om_topic_5' }));
-    expect(ds.session.replyTurnTargets?.['turn-104']).toEqual(expect.objectContaining({ rootMessageId: 'om_topic_104' }));
-  });
 });
 
 describe('legacy chat-scope inference', () => {

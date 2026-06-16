@@ -5,17 +5,6 @@ export type SessionReplyTarget =
   | { mode: 'plain'; chatId: string }
   | { mode: 'thread'; rootMessageId: string };
 
-const MAX_REPLY_TURN_TARGETS = 100;
-
-function pruneReplyTurnTargets(
-  targets: NonNullable<Session['replyTurnTargets']>,
-): NonNullable<Session['replyTurnTargets']> {
-  const entries = Object.entries(targets);
-  if (entries.length <= MAX_REPLY_TURN_TARGETS) return targets;
-  entries.sort((a, b) => a[1].updatedAt.localeCompare(b[1].updatedAt));
-  return Object.fromEntries(entries.slice(-MAX_REPLY_TURN_TARGETS));
-}
-
 export function resolveSessionReplyTarget(
   ds: Pick<DaemonSession, 'scope' | 'chatId' | 'session' | 'currentReplyTarget' | 'replyTurnTargets'>,
   turnId?: string,
@@ -71,13 +60,12 @@ export function beginReplyTargetTurn(
     };
     const turnTargets = { ...(ds.replyTurnTargets ?? ds.session.replyTurnTargets ?? {}) };
     turnTargets[turnId] = { rootMessageId: replyRootId, updatedAt: nowIso };
-    const prunedTurnTargets = pruneReplyTurnTargets(turnTargets);
     const target = { rootMessageId: replyRootId, turnId, updatedAt: nowIso };
     ds.replyThreadAliases = aliases;
-    ds.replyTurnTargets = prunedTurnTargets;
+    ds.replyTurnTargets = turnTargets;
     ds.currentReplyTarget = target;
     ds.session.replyThreadAliases = aliases;
-    ds.session.replyTurnTargets = prunedTurnTargets;
+    ds.session.replyTurnTargets = turnTargets;
     ds.session.currentReplyTarget = target;
     return;
   }

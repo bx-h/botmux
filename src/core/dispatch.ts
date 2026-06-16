@@ -201,10 +201,12 @@ export function findSubBotTopic(input: {
  *
  * Same-machine: the dispatch registry (orchestrate-dispatch.json) is local, so
  * `registryEntry` carries the orchestrator's exact coords (incl. orchRoot for a
- * thread-scope orchestrator). Cross-machine / damaged-registry fallback is only
- * allowed to stay inside a topic: when `fallbackTopicRoot` exists we reply there
- * and @ the orchestrator. Without a topic root, callers should refuse rather
- * than silently leak a report to the group top-level.
+ * thread-scope orchestrator). Cross-machine: the foreign sub-bot's daemon never
+ * wrote that registry, so `registryEntry` is undefined — but everything needed
+ * for the common case is on the sub-bot's OWN session: the report goes top-level
+ * into the chat the sub-topic lives in (= the orchestrator's chat) and @-s the
+ * orchestrator (creatorOpenId, captured from the dispatch @). So we fall back to
+ * `{ orchChatId: sessionChatId, orchScope: 'chat', orchRoot: '' }`.
  *
  * orchOpenId prefers `creatorOpenId` (stable, set on every session-creation path
  * incl. foreign-bot auto-create), then `ownerOpenId`, then the drifting
@@ -213,7 +215,6 @@ export function findSubBotTopic(input: {
 export function resolveReportTarget(input: {
   registryEntry?: { orchChatId?: string; orchScope?: string; orchRoot?: string };
   sessionChatId?: string;
-  fallbackTopicRoot?: string;
   creatorOpenId?: string;
   ownerOpenId?: string;
   quoteTargetSenderOpenId?: string;
@@ -221,8 +222,8 @@ export function resolveReportTarget(input: {
   const e = input.registryEntry;
   return {
     orchChatId: e?.orchChatId ?? input.sessionChatId,
-    orchScope: e?.orchScope ?? (input.fallbackTopicRoot ? 'thread' : 'chat'),
-    orchRoot: e?.orchRoot ?? input.fallbackTopicRoot ?? '',
+    orchScope: e?.orchScope ?? 'chat',
+    orchRoot: e?.orchRoot ?? '',
     orchOpenId: input.creatorOpenId ?? input.ownerOpenId ?? input.quoteTargetSenderOpenId,
   };
 }
